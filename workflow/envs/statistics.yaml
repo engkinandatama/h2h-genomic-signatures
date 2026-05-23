@@ -1,0 +1,12 @@
+name: statistics
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python >=3.9
+  - pandas
+  - scipy
+  - statsmodels
+  - matplotlib
+  - seaborn

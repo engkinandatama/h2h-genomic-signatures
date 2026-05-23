@@ -1,0 +1,11 @@
+name: structure
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python >=3.9
+  - biopython
+  - py3dmol
+  - requests
+  - pandas

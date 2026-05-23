@@ -1,0 +1,9 @@
+name: alignment
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - mafft >=7.5
+  - trimal >=1.4
+  - pal2nal >=14.1

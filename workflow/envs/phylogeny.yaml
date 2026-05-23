@@ -1,0 +1,8 @@
+name: phylogeny
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - iqtree >=2.2.0
+  - modeltest-ng >=0.1.7

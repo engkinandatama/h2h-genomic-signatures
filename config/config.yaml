@@ -1,0 +1,120 @@
+# config/config.yaml
+# Konfigurasi Utama Pipeline Convergent Genomic Signatures
+
+project_name: "Zoonotic_Convergent_Signatures"
+outdir: "results"
+
+# Threshold maksimal jumlah sekuens per grup
+max_sequences_per_group: 100
+
+viruses:
+  # ==========================================
+  # 1. Hantavirus Family
+  # ==========================================
+  Andes_virus_H2H:
+    family: "Hantaviridae"
+    category: "H2H"
+    taxon_id: "11608"
+    host_filter: "Homo sapiens"
+    uniprot_id: "Q8B8K7"
+    proteins: ["GnGc", "L_protein"]
+  Andes_virus_Reservoir:
+    family: "Hantaviridae"
+    category: "Reservoir"
+    taxon_id: "11608"
+    host_filter: "Oligoryzomys" # Rodent reservoir
+    uniprot_id: "Q8B8K7"
+    proteins: ["GnGc", "L_protein"]
+    
+  Sin_Nombre_virus_Spillover:
+    family: "Hantaviridae"
+    category: "Spillover"
+    taxon_id: "11604"
+    host_filter: "Homo sapiens"
+    uniprot_id: "P33453"
+    proteins: ["GnGc", "L_protein"]
+  Sin_Nombre_Reservoir:
+    family: "Hantaviridae"
+    category: "Reservoir"
+    taxon_id: "11604"
+    host_filter: "Peromyscus" # Rodent reservoir
+    uniprot_id: "P33453"
+    proteins: ["GnGc", "L_protein"]
+
+  Puumala_virus_Spillover:
+    family: "Hantaviridae"
+    category: "Spillover"
+    taxon_id: "11606"
+    host_filter: "Homo sapiens"
+    uniprot_id: "P27313"
+    proteins: ["GnGc", "L_protein"]
+  Puumala_Reservoir:
+    family: "Hantaviridae"
+    category: "Reservoir"
+    taxon_id: "11606"
+    host_filter: "Myodes" # Rodent reservoir
+    uniprot_id: "P27313"
+    proteins: ["GnGc", "L_protein"]
+
+  # ==========================================
+  # 2. Paramyxovirus Family
+  # ==========================================
+  Nipah_Bangladesh_H2H:
+    family: "Paramyxoviridae"
+    category: "H2H"
+    taxon_id: "12058"
+    geo_filter: "Bangladesh"
+    host_filter: "Homo sapiens"
+    uniprot_id: "Q9IH62"
+    proteins: ["G_protein", "F_protein", "L_protein"]
+  Nipah_Malaysia_Spillover:
+    family: "Paramyxoviridae"
+    category: "Spillover"
+    taxon_id: "12058"
+    geo_filter: "Malaysia"
+    host_filter: "Homo sapiens"
+    uniprot_id: "Q9IH62"
+    proteins: ["G_protein", "F_protein", "L_protein"]
+  Nipah_Reservoir:
+    family: "Paramyxoviridae"
+    category: "Reservoir"
+    taxon_id: "12058"
+    host_filter: "Pteropus" # Bat reservoir
+    uniprot_id: "Q9IH62"
+    proteins: ["G_protein", "F_protein", "L_protein"]
+    
+  # ==========================================
+  # 3. Filovirus Family
+  # ==========================================
+  Ebola_Zaire_H2H:
+    family: "Filoviridae"
+    category: "H2H"
+    taxon_id: "186538"
+    host_filter: "Homo sapiens"
+    uniprot_id: "P87666"
+    proteins: ["GP", "L_protein"]
+  Ebola_Zaire_Reservoir:
+    family: "Filoviridae"
+    category: "Reservoir"
+    taxon_id: "186538"
+    host_filter: "Rousettus" # Bat reservoir
+    uniprot_id: "P87666"
+    proteins: ["GP", "L_protein"]
+
+params:
+  mafft: "--auto --maxiterate 1000"
+  iqtree: "-m TEST -B 1000"
+  hyphy:
+    pvalue_threshold: 0.05
+    methods: ["MEME", "FEL", "FUBAR"]
+
+# Alokasi resource per task (Otomatis menyesuaikan dengan snakemake -c 64)
+resources:
+  threads:
+    mafft: 4
+    iqtree: 16
+    hyphy: 8
+  mem_mb:
+    mafft: 4000
+    iqtree: 16000
+    hyphy: 8000
