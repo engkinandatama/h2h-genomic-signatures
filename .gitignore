@@ -1,0 +1,7 @@
+.dev/
+results/
+logs/
+benchmarks/
+.snakemake/
+__pycache__/
+*.pyc
