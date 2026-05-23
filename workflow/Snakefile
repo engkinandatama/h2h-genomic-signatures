@@ -1,0 +1,33 @@
+configfile: "config/config.yaml"
+
+import os
+
+# Membaca konfigurasi dari config.yaml
+VIRUSES = config["viruses"].keys()
+PROTEINS = {}
+for v in VIRUSES:
+    PROTEINS[v] = config["viruses"][v]["proteins"]
+
+# Define WORKDIR based on config to isolate runs per project name
+WORKDIR = f"{config['outdir']}/{config['project_name']}"
+
+rule all:
+    input:
+        # Menentukan output akhir yang diharapkan dari pipeline
+        expand(WORKDIR + "/04_selection/{virus}/{protein}_selection_results.txt",
+               virus=VIRUSES,
+               protein=[p for v in VIRUSES for p in PROTEINS[v]]),
+        expand(WORKDIR + "/05_structure/{virus}/{protein}_3d_view.html",
+               virus=VIRUSES,
+               protein=[p for v in VIRUSES for p in PROTEINS[v]]),
+        WORKDIR + "/06_statistics/convergent_signature_matrix.csv",
+        WORKDIR + "/06_statistics/jaccard_similarity_heatmap.png",
+        WORKDIR + "/06_statistics/selection_phenotype_correlation.png"
+
+# Include rule modules
+include: "rules/01_fetch_and_qc.smk"
+include: "rules/02_alignment.smk"
+include: "rules/03_phylogeny.smk"
+include: "rules/04_selection.smk"
+include: "rules/05_structural_mapping.smk"
+include: "rules/06_statistics_convergence.smk"
