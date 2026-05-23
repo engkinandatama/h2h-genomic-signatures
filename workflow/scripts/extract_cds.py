@@ -146,7 +146,7 @@ def main():
                     host_obj = record.get('host')
                     if not isinstance(host_obj, dict):
                         host_obj = {}
-                    host_name = host_obj.get('name') or ''
+                    host_name = host_obj.get('organismName') or host_obj.get('name') or ''
                     
                     # Apply Geographic Filter jika ada
                     if args.geo and args.geo.lower() not in location.lower():
