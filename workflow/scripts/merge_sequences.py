@@ -46,7 +46,7 @@ def main():
                             # Tulis record sebelumnya
                             seq_str = "".join(current_seq)
                             # Bersihkan header dari spasi dan karakter ilegal jika ada
-                            clean_header = current_header.replace(" ", "_").replace(",", "_")
+                            clean_header = current_header.replace(" ", "_").replace(",", "_").replace(".", "_").replace("-", "_").replace(":", "_").replace("|", "_")
                             out_f.write(f">{virus_name}_{clean_header}\n{seq_str}\n")
                             total_seqs += 1
                         current_header = line.lstrip('>')
@@ -56,7 +56,7 @@ def main():
                 
                 if current_header:
                     seq_str = "".join(current_seq)
-                    clean_header = current_header.replace(" ", "_").replace(",", "_")
+                    clean_header = current_header.replace(" ", "_").replace(",", "_").replace(".", "_").replace("-", "_").replace(":", "_").replace("|", "_")
                     out_f.write(f">{virus_name}_{clean_header}\n{seq_str}\n")
                     total_seqs += 1
                     
