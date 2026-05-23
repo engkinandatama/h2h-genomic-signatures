@@ -198,31 +198,42 @@ def main():
             passed_nucleotides = []
             passed_proteins = []
             
+            dropped_by_length = 0
+            dropped_by_codon = 0
+            dropped_by_stop = 0
+            dropped_by_host = 0
+            dropped_by_protein = 0
+            
             for header, seq in records_to_process:
                 main_id, attrs = parse_fasta_header(header)
                 genomic_acc = extract_genomic_accession(main_id)
                 
                 # Filter 1: Cek apakah genomic accession ada di set valid
                 if genomic_acc not in valid_set:
+                    dropped_by_host += 1
                     continue
                     
                 # Filter 2: Pencocokan nama protein/gene
                 gene_val = attrs.get('gene', '')
                 protein_val = attrs.get('protein', '') or attrs.get('desc_protein', '')
                 if not protein_matches(args.protein, gene_val, protein_val):
+                    dropped_by_protein += 1
                     continue
                     
                 # Filter 3: Filter panjang minimum sekuens (hindari parsial)
-                if len(seq) < args.min_len:
+                if args.min_len and len(seq) < args.min_len:
+                    dropped_by_length += 1
                     continue
                     
                 # Filter 4: Kelipatan 3 (codon)
                 if len(seq) % 3 != 0:
+                    dropped_by_codon += 1
                     continue
                     
                 # Filter 5: Cek internal stop codon
                 translated_seq = translate_dna(seq)
                 if '*' in translated_seq[:-1]: # Abaikan stop codon di ujung akhir sekuens
+                    dropped_by_stop += 1
                     continue
                     
                 # Sekuens lolos seleksi
@@ -231,6 +242,7 @@ def main():
                 passed_nucleotides.append((main_id, clean_seq))
                 passed_proteins.append((main_id, translated_seq))
                 
+            print(f"[{args.protein}] Filter Stats -> Host/Geo: -{dropped_by_host}, Protein: -{dropped_by_protein}, Length: -{dropped_by_length}, Codon: -{dropped_by_codon}, StopCodon: -{dropped_by_stop}")
             print(f"[{args.protein}] Berhasil meloloskan {len(passed_nucleotides)} sekuens CDS berkualitas tinggi.")
             
             # Jika kosong, tetap tulis file kosong agar pipeline tidak crash karena missing file
