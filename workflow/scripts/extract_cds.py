@@ -22,11 +22,16 @@ def main():
         # 1. Parsing data_report.jsonl untuk filtering metadata
         metadata_file = [f for f in z.namelist() if f.endswith('data_report.jsonl')]
         if not metadata_file:
-            raise FileNotFoundError("data_report.jsonl tidak ditemukan di dalam zip.")
+            print(f"Error: data_report.jsonl tidak ditemukan di dalam {args.zip}.")
+            print("NCBI datasets mungkin mengembalikan hasil kosong (tidak ada sekuens yang cocok).")
+            import sys; sys.exit(1)
         
         valid_accessions = []
         with z.open(metadata_file[0]) as f:
             for line in f:
+                line = line.strip()
+                if not line:
+                    continue
                 record = json.loads(line.decode('utf-8'))
                 acc = record.get('accession')
                 location = record.get('location', {}).get('geographicLocation', '')

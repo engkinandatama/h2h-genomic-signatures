@@ -14,7 +14,6 @@ rule download_genomes:
         """
         echo "Starting download for {wildcards.virus} (Taxon: {params.taxon_id})" > {log}
         datasets download virus genome taxon {params.taxon_id} \
-            --complete-only \
             --include genome,protein,cds,annotation \
             --filename {output.zip} >> {log} 2>&1
         echo "Download complete." >> {log}
