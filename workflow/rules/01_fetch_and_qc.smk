@@ -23,7 +23,8 @@ rule filter_and_extract_cds:
     input:
         zip=WORKDIR + "/01_raw_fasta/{virus}/{virus}_dataset.zip"
     output:
-        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta"
+        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta",
+        faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.faa"
     log:
         WORKDIR + "/logs/filter_extract/{virus}_{protein}.log"
     benchmark:
@@ -37,7 +38,7 @@ rule filter_and_extract_cds:
         "../envs/download.yaml"
     shell:
         """
-        echo "Extracting CDS for {wildcards.virus} - {wildcards.protein}" > {log}
+        echo "Extracting CDS and protein translation for {wildcards.virus} - {wildcards.protein}" > {log}
         python workflow/scripts/extract_cds.py \
             --zip {input.zip} \
             --protein {wildcards.protein} \
@@ -45,6 +46,7 @@ rule filter_and_extract_cds:
             --host "{params.host_filter}" \
             --max {params.max_seq} \
             --min-len {params.min_len} \
-            --out {output.fasta} >> {log} 2>&1
+            --out-nuc {output.fasta} \
+            --out-prot {output.faa} >> {log} 2>&1
         echo "Extraction and filtering complete." >> {log}
         """

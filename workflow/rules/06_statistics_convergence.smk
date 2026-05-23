@@ -1,10 +1,8 @@
 # Rule 6: Statistical Analysis & Convergence (Agregasi Seluruh Virus)
 rule calculate_convergence:
     input:
-        # Mengambil SEMUA hasil seleksi dari SEMUA virus dan protein
-        selection_results=expand(WORKDIR + "/04_selection/{virus}/{protein}_selection_results.txt",
-                                 virus=VIRUSES,
-                                 protein=[p for v in VIRUSES for p in PROTEINS[v]])
+        # Mengambil SEMUA hasil seleksi dari SEMUA virus dan protein secara spesifik
+        selection_results=[WORKDIR + f"/04_selection/{virus}/{protein}_selection_results.txt" for virus in VIRUSES for protein in PROTEINS[virus]]
     output:
         matrix=WORKDIR + "/06_statistics/convergent_signature_matrix.csv",
         plot_jaccard=WORKDIR + "/06_statistics/jaccard_similarity_heatmap.png",

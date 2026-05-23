@@ -3,9 +3,9 @@ ruleorder: codon_alignment > align_proteins
 
 rule align_proteins:
     input:
-        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta"
+        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.faa"
     output:
-        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.fasta"
+        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.faa"
     log:
         WORKDIR + "/logs/align_proteins/{virus}_{protein}.log"
     benchmark:
@@ -27,7 +27,7 @@ rule align_proteins:
 
 rule codon_alignment:
     input:
-        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.fasta",
+        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.faa",
         cds=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta"
     output:
         codon_aln=WORKDIR + "/02_aligned/{virus}/{protein}_codon_aligned.fasta"
