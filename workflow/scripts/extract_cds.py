@@ -209,9 +209,16 @@ def main():
             dropped_by_host = 0
             dropped_by_protein = 0
             
+            seen_ids = set()
+            
             for header, seq in records_to_process:
                 main_id, attrs = parse_fasta_header(header)
                 genomic_acc = extract_genomic_accession(main_id)
+                
+                # Filter 0: Cek duplikasi main_id
+                if main_id in seen_ids:
+                    continue
+                seen_ids.add(main_id)
                 
                 # Filter 1: Cek apakah genomic accession ada di set valid
                 if genomic_acc not in valid_set:
