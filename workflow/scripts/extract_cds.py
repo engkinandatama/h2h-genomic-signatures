@@ -111,11 +111,15 @@ def main():
                 acc = record.get('accession')
                 
                 # Menggunakan OR {} untuk menghindari AttributeError jika objek bernilai None di JSON
-                loc_obj = record.get('location') or {}
-                location = loc_obj.get('geographicLocation', '')
+                loc_obj = record.get('location')
+                if not isinstance(loc_obj, dict):
+                    loc_obj = {}
+                location = loc_obj.get('geographicLocation') or ''
                 
-                host_obj = record.get('host') or {}
-                host_name = host_obj.get('name', '')
+                host_obj = record.get('host')
+                if not isinstance(host_obj, dict):
+                    host_obj = {}
+                host_name = host_obj.get('name') or ''
                 
                 # Apply Geographic Filter jika ada
                 if args.geo and args.geo.lower() not in location.lower():
