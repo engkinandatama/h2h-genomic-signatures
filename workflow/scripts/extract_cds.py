@@ -11,6 +11,7 @@ def parse_args():
     parser.add_argument("--geo", default="", help="Geographic filter (e.g. 'Bangladesh')")
     parser.add_argument("--host", default="", help="Host filter (e.g. 'Homo sapiens' or 'Pteropus')")
     parser.add_argument("--max", type=int, default=100, help="Maximum number of sequences to keep")
+    parser.add_argument("--min-len", type=int, default=1500, help="Minimum sequence length (bp) to avoid partial fragments")
     parser.add_argument("--out", required=True, help="Output FASTA file for CDS")
     return parser.parse_args()
 
@@ -63,6 +64,11 @@ def main():
         # valid_records = []
         # for record in SeqIO.parse(cds_fasta, "fasta"):
         #     if record.id in valid_set:
+        #         # Filter panjang sekuens (Hindari PCR parsial)
+        #         if len(record.seq) < args.min_len:
+        #             print(f"DROPPED {record.id}: Terlalu pendek ({len(record.seq)} bp)")
+        #             continue
+        #
         #         # Cek kelipatan 3 (codon)
         #         if len(record.seq) % 3 != 0: continue
         #         

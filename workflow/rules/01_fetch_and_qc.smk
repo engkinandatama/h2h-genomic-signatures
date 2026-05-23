@@ -31,7 +31,8 @@ rule filter_and_extract_cds:
     params:
         geo_filter=lambda wildcards: config["viruses"][wildcards.virus].get("geo_filter", ""),
         host_filter=lambda wildcards: config["viruses"][wildcards.virus].get("host_filter", ""),
-        max_seq=config["max_sequences_per_group"]
+        max_seq=config["max_sequences_per_group"],
+        min_len=config.get("min_length_cds", 1500)
     conda:
         "../envs/download.yaml"
     shell:
@@ -43,6 +44,7 @@ rule filter_and_extract_cds:
             --geo "{params.geo_filter}" \
             --host "{params.host_filter}" \
             --max {params.max_seq} \
+            --min-len {params.min_len} \
             --out {output.fasta} >> {log} 2>&1
         echo "Extraction and filtering complete." >> {log}
         """

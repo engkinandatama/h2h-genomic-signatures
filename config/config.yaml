@@ -7,6 +7,9 @@ outdir: "results"
 # Threshold maksimal jumlah sekuens per grup
 max_sequences_per_group: 100
 
+# Minimum panjang CDS (dalam base pairs) agar tidak memasukkan sekuens parsial (PCR fragments)
+min_length_cds: 1500
+
 viruses:
   # ==========================================
   # 1. Hantavirus Family
