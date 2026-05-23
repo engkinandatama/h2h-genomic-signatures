@@ -1,4 +1,6 @@
 # Rule 2: Alignment
+ruleorder: codon_alignment > align_proteins
+
 rule align_proteins:
     input:
         fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta"
