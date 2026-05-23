@@ -89,13 +89,15 @@ def protein_matches(target, gene_val, protein_val):
 def main():
     args = parse_args()
     
-    with zipfile.ZipFile(args.zip, 'r') as z:
-        # 1. Parsing data_report.jsonl untuk filtering metadata
-        metadata_file = [f for f in z.namelist() if f.endswith('data_report.jsonl')]
-        if not metadata_file:
-            print(f"Error: data_report.jsonl tidak ditemukan di dalam {args.zip}.")
-            print("NCBI datasets mungkin mengembalikan hasil kosong (tidak ada sekuens yang cocok).")
-            import sys; sys.exit(1)
+    try:
+        with zipfile.ZipFile(args.zip, 'r') as z:
+            # 1. Parsing data_report.jsonl untuk filtering metadata
+            metadata_file = [f for f in z.namelist() if f.endswith('data_report.jsonl')]
+            if not metadata_file:
+                print(f"Error: data_report.jsonl tidak ditemukan di dalam {args.zip}.")
+                print("NCBI datasets mungkin mengembalikan hasil kosong (tidak ada sekuens yang cocok).")
+                import sys; sys.exit(1)
+
         
         valid_accessions = []
         with z.open(metadata_file[0]) as f:
@@ -226,6 +228,12 @@ def main():
                 
         print(f"[{args.protein}] Hasil nukleotida disimpan di: {args.out_nuc}")
         print(f"[{args.protein}] Hasil protein disimpan di: {args.out_prot}")
+
+    except zipfile.BadZipFile:
+        print(f"Error: {args.zip} bukan file ZIP yang valid atau korup.")
+        print("Ini biasanya terjadi jika NCBI Datasets memblokir request karena rate limit atau koneksi terputus.")
+        print("Pastikan NCBI_API_KEY diset dan coba batasi concurrency Snakemake.")
+        import sys; sys.exit(1)
 
 if __name__ == "__main__":
     main()

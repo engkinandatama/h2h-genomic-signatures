@@ -8,6 +8,8 @@ rule download_genomes:
         WORKDIR + "/benchmarks/download_genomes/{virus}.tsv"
     params:
         taxon_id=lambda wildcards: config["viruses"][wildcards.virus]["taxon_id"]
+    resources:
+        ncbi_api=1
     conda:
         "../envs/download.yaml"
     shell:
