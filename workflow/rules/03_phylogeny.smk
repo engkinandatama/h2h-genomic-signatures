@@ -19,7 +19,19 @@ rule build_tree:
         "../envs/phylogeny.yaml"
     shell:
         """
-        echo "Starting IQ-TREE2 for {wildcards.virus} - {wildcards.protein} with {threads} threads" > {log}
-        iqtree2 -s {input.codon_aln} --prefix {params.prefix} {params.iqtree_args} -T {threads} >> {log} 2>&1
+        echo "Starting phylogenetic tree construction for {wildcards.virus} - {wildcards.protein} with {threads} threads" > {log}
+        
+        # Check if iqtree2 or iqtree is available in conda environment
+        if command -v iqtree2 >/dev/null 2>&1; then
+            IQTREE_CMD="iqtree2"
+        elif command -v iqtree >/dev/null 2>&1; then
+            IQTREE_CMD="iqtree"
+        else
+            echo "Error: Neither iqtree2 nor iqtree was found in the environment." >> {log}
+            exit 127
+        fi
+        
+        echo "Using binary: $IQTREE_CMD" >> {log}
+        $IQTREE_CMD -s {input.codon_aln} --prefix {params.prefix} {params.iqtree_args} -T {threads} >> {log} 2>&1
         echo "Tree building complete." >> {log}
         """
