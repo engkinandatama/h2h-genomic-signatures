@@ -4,6 +4,7 @@ channels:
   - bioconda
   - defaults
 dependencies:
+  - python >=3.9
   - mafft >=7.5
   - trimal >=1.4
   - pal2nal >=14.1
