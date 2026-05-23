@@ -9,7 +9,7 @@ rule merge_sequences:
     log:
         WORKDIR + "/logs/merge_sequences/{virus_group}_{protein}.log"
     params:
-        viruses=lambda wildcards: config["virus_groups"][wildcards.virus_group]["viruses"]
+        viruses=lambda wildcards: " ".join(config["virus_groups"][wildcards.virus_group]["viruses"])
     conda:
         "../envs/alignment.yaml"
     shell:

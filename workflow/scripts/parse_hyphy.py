@@ -128,11 +128,32 @@ def main():
     
     total_sites = 0
     if meme_res:
-        total_sites = max(total_sites, max(meme_res.keys()))
+        total_sites = max(total_sites, max(meme_res.keys(), default=0))
     if fel_res:
-        total_sites = max(total_sites, max(fel_res.keys()))
+        total_sites = max(total_sites, max(fel_res.keys(), default=0))
     if fubar_res:
-        total_sites = max(total_sites, max(fubar_res.keys()))
+        total_sites = max(total_sites, max(fubar_res.keys(), default=0))
+        
+    # Jika tidak ada situs sama sekali (semua JSON kosong), buat output kosong dan exit
+    if total_sites == 0:
+        for out_file in [args.out_consensus, args.out_meme, args.out_fel, args.out_fubar]:
+            out_dir = os.path.dirname(out_file)
+            if out_dir:
+                os.makedirs(out_dir, exist_ok=True)
+            with open(out_file, 'w') as f:
+                f.write("Site\tP-value\n")
+        out_dir = os.path.dirname(args.out_fubar)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(args.out_fubar, 'w') as f:
+            f.write("Site\tPosteriorProb\n")
+        out_dir = os.path.dirname(args.out_complete)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(args.out_complete, 'w') as f:
+            f.write("Site\tMEME_p\tFEL_p\tFUBAR_pp\tn_methods\tConsensus\n")
+        print("Warning: Semua JSON input kosong atau tidak valid. File output kosong dibuat.")
+        sys.exit(0)
         
     for out_file in [args.out_consensus, args.out_meme, args.out_fel, args.out_fubar, args.out_complete]:
         out_dir = os.path.dirname(out_file)
