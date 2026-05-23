@@ -1,15 +1,15 @@
-# Rule 2: Alignment
+# Rule 2: Alignment (modified for virus_groups)
 ruleorder: codon_alignment > align_proteins
 
 rule align_proteins:
     input:
-        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.faa"
+        fasta=WORKDIR + "/02_aligned/{virus_group}/{protein}_merged.faa"
     output:
-        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.faa"
+        msa=WORKDIR + "/02_aligned/{virus_group}/{protein}_aligned.faa"
     log:
-        WORKDIR + "/logs/align_proteins/{virus}_{protein}.log"
+        WORKDIR + "/logs/align_proteins/{virus_group}_{protein}.log"
     benchmark:
-        WORKDIR + "/benchmarks/align_proteins/{virus}_{protein}.tsv"
+        WORKDIR + "/benchmarks/align_proteins/{virus_group}_{protein}.tsv"
     threads:
         config.get("resources", {}).get("threads", {}).get("mafft", 4)
     resources:
@@ -20,26 +20,51 @@ rule align_proteins:
         "../envs/alignment.yaml"
     shell:
         """
-        echo "Starting MAFFT alignment for {wildcards.virus} - {wildcards.protein}" > {log}
+        echo "Starting MAFFT alignment for {wildcards.virus_group} - {wildcards.protein}" > {log}
+        
+        # Check if merged file is empty or has < 4 sequences
+        n_seqs=$(grep -c "^>" {input.fasta} 2>/dev/null || echo "0")
+        if [ "$n_seqs" -lt 4 ]; then
+            echo "SKIP: Hanya $n_seqs sekuens ditemukan. Membuat file output kosong." >> {log}
+            touch {output.msa}
+            exit 0
+        fi
+        
         mafft --thread {threads} {params.mafft_args} {input.fasta} > {output.msa} 2>> {log}
         echo "Alignment complete." >> {log}
         """
 
 rule codon_alignment:
     input:
-        msa=WORKDIR + "/02_aligned/{virus}/{protein}_aligned.faa",
-        cds=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta"
+        msa=WORKDIR + "/02_aligned/{virus_group}/{protein}_aligned.faa",
+        cds=WORKDIR + "/02_aligned/{virus_group}/{protein}_merged.fasta"
     output:
-        codon_aln=WORKDIR + "/02_aligned/{virus}/{protein}_codon_aligned.fasta"
+        codon_aln=WORKDIR + "/02_aligned/{virus_group}/{protein}_codon_aligned.fasta"
     log:
-        WORKDIR + "/logs/codon_alignment/{virus}_{protein}.log"
+        WORKDIR + "/logs/codon_alignment/{virus_group}_{protein}.log"
     benchmark:
-        WORKDIR + "/benchmarks/codon_alignment/{virus}_{protein}.tsv"
+        WORKDIR + "/benchmarks/codon_alignment/{virus_group}_{protein}.tsv"
     conda:
         "../envs/alignment.yaml"
     shell:
         """
-        echo "Starting pal2nal codon alignment for {wildcards.virus} - {wildcards.protein}" > {log}
+        echo "Starting pal2nal codon alignment for {wildcards.virus_group} - {wildcards.protein}" > {log}
+        
+        # Check minimum sequences before running pal2nal
+        if [ ! -s "{input.msa}" ]; then
+            echo "SKIP: Input MSA kosong. Membuat file output kosong." >> {log}
+            touch {output.codon_aln}
+            exit 0
+        fi
+        
+        n_seqs=$(grep -c "^>" {input.msa} 2>/dev/null || echo "0")
+        echo "Jumlah sekuens dalam MSA: $n_seqs" >> {log}
+        if [ "$n_seqs" -lt 4 ]; then
+            echo "SKIP: Hanya $n_seqs sekuens ditemukan (minimum 4 diperlukan untuk analisis filogenetik). Membuat file output kosong." >> {log}
+            touch {output.codon_aln}
+            exit 0
+        fi
+        
         pal2nal.pl {input.msa} {input.cds} -output fasta > {output.codon_aln} 2>> {log}
         echo "Codon alignment complete." >> {log}
         """

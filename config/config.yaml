@@ -17,14 +17,14 @@ viruses:
   Andes_virus_H2H:
     family: "Hantaviridae"
     category: "H2H"
-    taxon_id: "11608"
+    taxon_id: "1980456"  # Andes orthohantavirus (updated from old ID 11608)
     host_filter: "Homo sapiens"
     uniprot_id: "Q8B8K7"
     proteins: ["GnGc", "L_protein"]
   Andes_virus_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
-    taxon_id: "11608"
+    taxon_id: "1980456"  # Andes orthohantavirus (updated from old ID 11608)
     host_filter: "Oligoryzomys" # Rodent reservoir
     uniprot_id: "Q8B8K7"
     proteins: ["GnGc", "L_protein"]
@@ -32,14 +32,14 @@ viruses:
   Sin_Nombre_virus_Spillover:
     family: "Hantaviridae"
     category: "Spillover"
-    taxon_id: "11604"
+    taxon_id: "3052499"  # Orthohantavirus sinnombreense (updated from old ID 11604)
     host_filter: "Homo sapiens"
     uniprot_id: "P33453"
     proteins: ["GnGc", "L_protein"]
   Sin_Nombre_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
-    taxon_id: "11604"
+    taxon_id: "3052499"  # Orthohantavirus sinnombreense (updated from old ID 11604)
     host_filter: "Peromyscus" # Rodent reservoir
     uniprot_id: "P33453"
     proteins: ["GnGc", "L_protein"]
@@ -47,14 +47,14 @@ viruses:
   Puumala_virus_Spillover:
     family: "Hantaviridae"
     category: "Spillover"
-    taxon_id: "11606"
+    taxon_id: "286283"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Homo sapiens"
     uniprot_id: "P27313"
     proteins: ["GnGc", "L_protein"]
   Puumala_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
-    taxon_id: "11606"
+    taxon_id: "286283"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Myodes" # Rodent reservoir
     uniprot_id: "P27313"
     proteins: ["GnGc", "L_protein"]
@@ -65,7 +65,7 @@ viruses:
   Nipah_Bangladesh_H2H:
     family: "Paramyxoviridae"
     category: "H2H"
-    taxon_id: "12058"
+    taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
     geo_filter: "Bangladesh"
     host_filter: "Homo sapiens"
     uniprot_id: "Q9IH62"
@@ -73,7 +73,7 @@ viruses:
   Nipah_Malaysia_Spillover:
     family: "Paramyxoviridae"
     category: "Spillover"
-    taxon_id: "12058"
+    taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
     geo_filter: "Malaysia"
     host_filter: "Homo sapiens"
     uniprot_id: "Q9IH62"
@@ -81,7 +81,7 @@ viruses:
   Nipah_Reservoir:
     family: "Paramyxoviridae"
     category: "Reservoir"
-    taxon_id: "12058"
+    taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
     host_filter: "Pteropus" # Bat reservoir
     uniprot_id: "Q9IH62"
     proteins: ["G_protein", "F_protein", "L_protein"]
@@ -104,11 +104,45 @@ viruses:
     uniprot_id: "P87666"
     proteins: ["GP", "L_protein"]
 
+virus_groups:
+  Andes_virus:
+    viruses: ["Andes_virus_H2H", "Andes_virus_Reservoir"]
+    proteins: ["GnGc", "L_protein"]
+    family: "Hantaviridae"
+    uniprot_id: "Q8B8K7" # Andes virus H2H representative UniProt ID
+  Sin_Nombre_virus:
+    viruses: ["Sin_Nombre_virus_Spillover", "Sin_Nombre_Reservoir"]
+    proteins: ["GnGc", "L_protein"]
+    family: "Hantaviridae"
+    uniprot_id: "P33453" # Sin Nombre virus representative UniProt ID
+  Puumala_virus:
+    viruses: ["Puumala_virus_Spillover", "Puumala_Reservoir"]
+    proteins: ["GnGc", "L_protein"]
+    family: "Hantaviridae"
+    uniprot_id: "P27313" # Puumala virus representative UniProt ID
+  Nipah_Bangladesh:
+    viruses: ["Nipah_Bangladesh_H2H", "Nipah_Reservoir"]
+    proteins: ["G_protein", "F_protein", "L_protein"]
+    family: "Paramyxoviridae"
+    uniprot_id: "Q9IH62" # Nipah virus Bangladesh representative UniProt ID
+  Nipah_Malaysia:
+    viruses: ["Nipah_Malaysia_Spillover", "Nipah_Reservoir"]
+    proteins: ["G_protein", "F_protein", "L_protein"]
+    family: "Paramyxoviridae"
+    uniprot_id: "Q9IH62" # Nipah virus Malaysia representative UniProt ID
+  Ebola_Zaire:
+    viruses: ["Ebola_Zaire_H2H", "Ebola_Zaire_Reservoir"]
+    proteins: ["GP", "L_protein"]
+    family: "Filoviridae"
+    uniprot_id: "P87666" # Ebola Zaire H2H representative UniProt ID
+
 params:
   mafft: "--auto --maxiterate 1000"
   iqtree: "-m TEST -B 1000"
   hyphy:
-    pvalue_threshold: 0.05
+    pvalue_threshold: 0.05       # Threshold p-value untuk MEME dan FEL
+    fubar_pp_threshold: 0.90     # Posterior probability threshold untuk FUBAR (rekomendasi > 0.90)
+    min_methods: 2               # Minimal metode yang signifikan (dari 3) agar site dinyatakan positif
     methods: ["MEME", "FEL", "FUBAR"]
 
 # Alokasi resource per task (Otomatis menyesuaikan dengan snakemake -c 64)
@@ -121,3 +155,4 @@ resources:
     mafft: 4000
     iqtree: 16000
     hyphy: 8000
+

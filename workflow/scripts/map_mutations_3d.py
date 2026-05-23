@@ -66,8 +66,8 @@ def generate_fallback_pdb(out_path, uniprot_id):
 def main():
     args = parse_args()
     
-    os.makedirs(os.path.dirname(args.out_pdb), exist_ok=True)
-    os.makedirs(os.path.dirname(args.out_html), exist_ok=True)
+    os.makedirs(os.path.dirname(args.out_pdb) or ".", exist_ok=True)
+    os.makedirs(os.path.dirname(args.out_html) or ".", exist_ok=True)
     
     # 1. Baca situs seleksi positif
     positive_sites = read_selection_sites(args.selection)
@@ -93,7 +93,13 @@ def main():
                     # Warnai residu terpilih dengan B-factor 100.00
                     b_factor = 100.00 if res_num in positive_set else 0.00
                     b_factor_str = f"{b_factor:6.2f}"
-                    modified_line = line[:60] + b_factor_str + line[66:]
+                    # Pastikan baris cukup panjang sebelum diparsing
+                    if len(line) >= 66:
+                        modified_line = line[:60] + b_factor_str + line[66:]
+                    else:
+                        # Pad baris yang terlalu pendek
+                        padded = line.rstrip("\n").ljust(66)
+                        modified_line = padded[:60] + b_factor_str + "\n"
                     outfile.write(modified_line)
                     pdb_content.append(modified_line)
                 except Exception:

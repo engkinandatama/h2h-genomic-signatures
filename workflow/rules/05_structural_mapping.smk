@@ -1,21 +1,30 @@
-# Rule 5: Structural Mapping 3D (AlphaFold + Py3Dmol)
+# Rule 5: Structural Mapping 3D (AlphaFold + Py3Dmol) - modified for virus_groups
 rule map_structure:
     input:
-        selection_results=WORKDIR + "/04_selection/{virus}/{protein}_selection_results.txt"
+        selection_results=WORKDIR + "/04_selection/{virus_group}/{protein}_selection_results.txt"
     output:
-        mapped_pdb=WORKDIR + "/05_structure/{virus}/{protein}_mapped.pdb",
-        html_view=WORKDIR + "/05_structure/{virus}/{protein}_3d_view.html"
+        mapped_pdb=WORKDIR + "/05_structure/{virus_group}/{protein}_mapped.pdb",
+        html_view=WORKDIR + "/05_structure/{virus_group}/{protein}_3d_view.html"
     log:
-        WORKDIR + "/logs/map_structure/{virus}_{protein}.log"
+        WORKDIR + "/logs/map_structure/{virus_group}_{protein}.log"
     benchmark:
-        WORKDIR + "/benchmarks/map_structure/{virus}_{protein}.tsv"
+        WORKDIR + "/benchmarks/map_structure/{virus_group}_{protein}.tsv"
     params:
-        uniprot_id=lambda wildcards: config["viruses"][wildcards.virus].get("uniprot_id", "UNKNOWN")
+        uniprot_id=lambda wildcards: config["virus_groups"][wildcards.virus_group].get("uniprot_id", "UNKNOWN")
     conda:
         "../envs/structure.yaml"
     shell:
         """
         echo "Starting Structural Mapping for UniProt {params.uniprot_id}..." > {log}
+        
+        # Skip jika selection_results kosong
+        if [ ! -s "{input.selection_results}" ]; then
+            echo "SKIP: File selection results kosong. Membuat output kosong." >> {log}
+            mkdir -p $(dirname {output.mapped_pdb})
+            touch {output.mapped_pdb} {output.html_view}
+            exit 0
+        fi
+        
         python workflow/scripts/map_mutations_3d.py \
             --uniprot {params.uniprot_id} \
             --selection {input.selection_results} \

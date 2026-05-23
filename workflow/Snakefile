@@ -4,19 +4,25 @@ import os
 
 # Membaca konfigurasi dari config.yaml
 VIRUSES = config["viruses"].keys()
-PROTEINS = {}
-for v in VIRUSES:
-    PROTEINS[v] = config["viruses"][v]["proteins"]
+VIRUS_GROUPS = config["virus_groups"].keys()
 
 # Define WORKDIR based on config to isolate runs per project name
 WORKDIR = f"{config['outdir']}/{config['project_name']}"
 
-# Menyiapkan list target spesifik agar tidak terjadi kombinasi silang (cross-product) antar virus dan protein
+# Menyiapkan list target spesifik agar tidak terjadi kombinasi silang (cross-product)
 TARGETS = []
-for v in VIRUSES:
-    for p in PROTEINS[v]:
-        TARGETS.append(f"{WORKDIR}/04_selection/{v}/{p}_selection_results.txt")
-        TARGETS.append(f"{WORKDIR}/05_structure/{v}/{p}_3d_view.html")
+
+# Target per virus group dan protein
+for vg in VIRUS_GROUPS:
+    for p in config["virus_groups"][vg]["proteins"]:
+        # Hasil positive selection
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_results.txt")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_meme_results.txt")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fel_results.txt")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fubar_results.txt")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_complete.tsv")
+        # Visualisasi 3D
+        TARGETS.append(f"{WORKDIR}/05_structure/{vg}/{p}_3d_view.html")
         
 # Tambahkan target final statistik
 TARGETS.append(f"{WORKDIR}/06_statistics/convergent_signature_matrix.csv")
@@ -29,6 +35,7 @@ rule all:
 
 # Include rule modules
 include: "rules/01_fetch_and_qc.smk"
+include: "rules/02b_merge_alignment.smk"
 include: "rules/02_alignment.smk"
 include: "rules/03_phylogeny.smk"
 include: "rules/04_selection.smk"

@@ -1,25 +1,40 @@
-# Rule 3: Phylogenetics
+# Rule 3: Phylogenetics (modified for virus_groups)
 rule build_tree:
     input:
-        codon_aln=WORKDIR + "/02_aligned/{virus}/{protein}_codon_aligned.fasta"
+        codon_aln=WORKDIR + "/02_aligned/{virus_group}/{protein}_codon_aligned.fasta"
     output:
-        tree=WORKDIR + "/03_trees/{virus}/{protein}_tree.treefile"
+        tree=WORKDIR + "/03_trees/{virus_group}/{protein}_tree.treefile"
     log:
-        WORKDIR + "/logs/build_tree/{virus}_{protein}.log"
+        WORKDIR + "/logs/build_tree/{virus_group}_{protein}.log"
     benchmark:
-        WORKDIR + "/benchmarks/build_tree/{virus}_{protein}.tsv"
+        WORKDIR + "/benchmarks/build_tree/{virus_group}_{protein}.tsv"
     threads:
         config.get("resources", {}).get("threads", {}).get("iqtree", 16)
     resources:
         mem_mb=config.get("resources", {}).get("mem_mb", {}).get("iqtree", 16000)
     params:
         iqtree_args=config["params"]["iqtree"],
-        prefix=WORKDIR + "/03_trees/{virus}/{protein}_tree"
+        prefix=WORKDIR + "/03_trees/{virus_group}/{protein}_tree"
     conda:
         "../envs/phylogeny.yaml"
     shell:
         """
-        echo "Starting phylogenetic tree construction for {wildcards.virus} - {wildcards.protein} with {threads} threads" > {log}
+        echo "Starting phylogenetic tree construction for {wildcards.virus_group} - {wildcards.protein} with {threads} threads" > {log}
+        
+        # Check minimum sequences before running IQ-TREE
+        if [ ! -s "{input.codon_aln}" ]; then
+            echo "SKIP: Input codon alignment kosong. Membuat file treefile kosong." >> {log}
+            touch {output.tree}
+            exit 0
+        fi
+        
+        n_seqs=$(grep -c "^>" {input.codon_aln} 2>/dev/null || echo "0")
+        echo "Jumlah sekuens dalam codon alignment: $n_seqs" >> {log}
+        if [ "$n_seqs" -lt 4 ]; then
+            echo "SKIP: Hanya $n_seqs sekuens ditemukan (IQ-TREE memerlukan minimal 4). Membuat file treefile kosong." >> {log}
+            touch {output.tree}
+            exit 0
+        fi
         
         # Check if iqtree2 or iqtree is available in conda environment
         if command -v iqtree2 >/dev/null 2>&1; then
@@ -32,6 +47,6 @@ rule build_tree:
         fi
         
         echo "Using binary: $IQTREE_CMD" >> {log}
-        $IQTREE_CMD -s {input.codon_aln} --prefix {params.prefix} {params.iqtree_args} -T {threads} >> {log} 2>&1
+        $IQTREE_CMD -s {input.codon_aln} --prefix {params.prefix} {params.iqtree_args} -T {threads} -redo >> {log} 2>&1
         echo "Tree building complete." >> {log}
         """

@@ -88,8 +88,12 @@ def protein_matches(target, gene_val, protein_val):
 
 def write_empty_outputs(args):
     # Buat file kosong agar Snakemake tidak mengeluh "Missing output files"
-    os.makedirs(os.path.dirname(args.out_nuc), exist_ok=True)
-    os.makedirs(os.path.dirname(args.out_prot), exist_ok=True)
+    nuc_dir = os.path.dirname(args.out_nuc)
+    prot_dir = os.path.dirname(args.out_prot)
+    if nuc_dir:
+        os.makedirs(nuc_dir, exist_ok=True)
+    if prot_dir:
+        os.makedirs(prot_dir, exist_ok=True)
     with open(args.out_nuc, 'w') as f: pass
     with open(args.out_prot, 'w') as f: pass
 
@@ -237,8 +241,12 @@ def main():
                 print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens sesuai batas maksimal.")
                 
             # 4. Tulis hasil output
-            os.makedirs(os.path.dirname(args.out_nuc), exist_ok=True)
-            os.makedirs(os.path.dirname(args.out_prot), exist_ok=True)
+            nuc_dir = os.path.dirname(args.out_nuc)
+            prot_dir = os.path.dirname(args.out_prot)
+            if nuc_dir:
+                os.makedirs(nuc_dir, exist_ok=True)
+            if prot_dir:
+                os.makedirs(prot_dir, exist_ok=True)
             
             # Tulis nukleotida
             with open(args.out_nuc, 'w') as out_n:

@@ -20,14 +20,17 @@ def label_leaves(newick_str, tag="{Foreground}", target_taxa=None):
         
         # Jika nama node mengandung huruf (menandakan ID sekuens daun)
         if any(c.isalpha() for c in node_name):
-            # Jika ada daftar target_taxa spesifik, pastikan ia cocok
+            # Jika ada daftar target_taxa spesifik, pastikan cocok
             if target_taxa:
-                if any(t in node_name for t in target_taxa):
+                if any(t.lower() in node_name.lower() for t in target_taxa):
                     return f"{node_name}{tag}"
                 else:
                     return match.group(0)
-            # Jika target_taxa kosong, labeli semua daun (untuk pohon homogen H2H/Spillover)
-            return f"{node_name}{tag}"
+            
+            # Default Opsi A: Labeli jika mengandung h2h atau spillover
+            name_lower = node_name.lower()
+            if "h2h" in name_lower or "spillover" in name_lower:
+                return f"{node_name}{tag}"
             
         return match.group(0)
         
@@ -45,19 +48,13 @@ def main():
     with open(args.tree, 'r') as f:
         tree_str = f.read().strip()
         
-    # Tentukan apakah kita harus melabeli pohon ini
-    # Jika kategori adalah H2H atau Spillover, kita tandai seluruh daun sebagai Foreground
-    # Jika kategori adalah Reservoir, kita biarkan default (tanpa label Foreground)
-    is_foreground = args.category.upper() in ["H2H", "SPILLOVER"]
-    
-    if is_foreground or args.h2h_taxa:
-        print(f"Melabeli pohon {args.tree} sebagai Foreground...")
-        labeled_tree = label_leaves(tree_str, tag="{Foreground}", target_taxa=args.h2h_taxa)
-    else:
-        print(f"Pohon {args.tree} dikategorikan sebagai Background (tidak dilabeli).")
-        labeled_tree = tree_str
+    # Selalu jalankan labeling untuk pohon gabungan (Opsi A)
+    print(f"Melabeli pohon {args.tree} untuk cabang Foreground (H2H/Spillover)...")
+    labeled_tree = label_leaves(tree_str, tag="{Foreground}", target_taxa=args.h2h_taxa)
         
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(args.out, 'w') as f:
         f.write(labeled_tree + "\n")
         
@@ -65,3 +62,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
