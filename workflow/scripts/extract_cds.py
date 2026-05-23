@@ -51,6 +51,12 @@ def parse_fasta_header(header):
     matches = re.findall(r'\[([a-zA-Z0-9_]+)=([^\]]+)\]', header)
     for key, val in matches:
         attrs[key] = val.strip()
+    
+    # Extract protein name outside brackets
+    desc_match = re.search(r'^[^\s]+\s+([^\[]+)', header)
+    if desc_match:
+        attrs['desc_protein'] = desc_match.group(1).strip()
+        
     return main_id, attrs
 
 def extract_genomic_accession(main_id):
@@ -202,7 +208,7 @@ def main():
                     
                 # Filter 2: Pencocokan nama protein/gene
                 gene_val = attrs.get('gene', '')
-                protein_val = attrs.get('protein', '')
+                protein_val = attrs.get('protein', '') or attrs.get('desc_protein', '')
                 if not protein_matches(args.protein, gene_val, protein_val):
                     continue
                     
