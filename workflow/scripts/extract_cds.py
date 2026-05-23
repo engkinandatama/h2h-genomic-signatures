@@ -60,12 +60,17 @@ def parse_fasta_header(header):
     return main_id, attrs
 
 def extract_genomic_accession(main_id):
-    match = re.search(r'lcl\|([A-Z0-9_.]+)_cds', main_id)
-    if match:
-        return match.group(1)
-    if '_cds' in main_id:
-        return main_id.split('_cds')[0]
-    return main_id
+    # main_id format: e.g. "AY228237.1:12-1298" atau "lcl|AY228237.1_cds_1"
+    base = main_id.split(':')[0]
+    
+    # Hapus prefix lcl| jika ada dari NCBI datasets
+    if base.startswith('lcl|'):
+        base = base[4:]
+        
+    # Hapus suffix _cds_xxx atau _prot_xxx jika ada
+    base = re.sub(r'_(cds|prot)_.*$', '', base)
+    
+    return base
 
 def protein_matches(target, gene_val, protein_val):
     target = target.lower().strip()
