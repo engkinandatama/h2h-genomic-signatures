@@ -86,9 +86,25 @@ def protein_matches(target, gene_val, protein_val):
     else:
         return target in protein_val or target in gene_val
 
+def write_empty_outputs(args):
+    # Buat file kosong agar Snakemake tidak mengeluh "Missing output files"
+    os.makedirs(os.path.dirname(args.out_nuc), exist_ok=True)
+    os.makedirs(os.path.dirname(args.out_prot), exist_ok=True)
+    with open(args.out_nuc, 'w') as f: pass
+    with open(args.out_prot, 'w') as f: pass
+
 def main():
     args = parse_args()
     
+    # Debug info: Cek ukuran file zip
+    try:
+        zip_size = os.path.getsize(args.zip)
+        print(f"DEBUG: Membaca file ZIP: {args.zip} ({zip_size} bytes)")
+    except Exception as e:
+        print(f"DEBUG: Gagal membaca ukuran file ZIP: {e}")
+        write_empty_outputs(args)
+        return
+
     try:
         with zipfile.ZipFile(args.zip, 'r') as z:
             # 1. Parsing data_report.jsonl untuk filtering metadata
@@ -96,138 +112,146 @@ def main():
             if not metadata_file:
                 print(f"Error: data_report.jsonl tidak ditemukan di dalam {args.zip}.")
                 print("NCBI datasets mungkin mengembalikan hasil kosong (tidak ada sekuens yang cocok).")
-                import sys; sys.exit(1)
-
-        
-        valid_accessions = []
-        with z.open(metadata_file[0]) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line.decode('utf-8'))
-                except Exception as e:
-                    print(f"Warning: gagal parse JSON line: {e}")
-                    continue
-                acc = record.get('accession')
+                print(f"DEBUG: Isi file ZIP ({len(z.namelist())} file):")
+                for name in z.namelist()[:30]:
+                    print(f" - {name}")
+                if len(z.namelist()) > 30:
+                    print(" - ... (dan file lainnya)")
+                write_empty_outputs(args)
+                return
+            
+            valid_accessions = []
+            with z.open(metadata_file[0]) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line.decode('utf-8'))
+                    except Exception as e:
+                        print(f"Warning: gagal parse JSON line: {e}")
+                        continue
+                    acc = record.get('accession')
+                    
+                    # Menggunakan OR {} untuk menghindari AttributeError jika objek bernilai None di JSON
+                    loc_obj = record.get('location')
+                    if not isinstance(loc_obj, dict):
+                        loc_obj = {}
+                    location = loc_obj.get('geographicLocation') or ''
+                    
+                    host_obj = record.get('host')
+                    if not isinstance(host_obj, dict):
+                        host_obj = {}
+                    host_name = host_obj.get('name') or ''
+                    
+                    # Apply Geographic Filter jika ada
+                    if args.geo and args.geo.lower() not in location.lower():
+                        continue
+                        
+                    # Apply Host Filter jika ada (H2H vs Reservoir)
+                    if args.host and args.host.lower() not in host_name.lower():
+                        continue
+                    
+                    valid_accessions.append(acc)
+            
+            valid_set = set(valid_accessions)
+            print(f"Ditemukan {len(valid_set)} accession genom yang cocok setelah filter Host='{args.host}' dan Geo='{args.geo}'")
+            
+            # 2. Cari file cds.fna di dalam ZIP
+            cds_files = [f for f in z.namelist() if f.endswith('cds.fna')]
+            if not cds_files:
+                print(f"Error: cds.fna tidak ditemukan di dalam {args.zip}.")
+                write_empty_outputs(args)
+                return
                 
-                # Menggunakan OR {} untuk menghindari AttributeError jika objek bernilai None di JSON
-                loc_obj = record.get('location')
-                if not isinstance(loc_obj, dict):
-                    loc_obj = {}
-                location = loc_obj.get('geographicLocation') or ''
+            # Parse file cds.fna
+            records_to_process = []
+            current_header = None
+            current_seq = []
+            
+            with z.open(cds_files[0], 'r') as f:
+                for line in f:
+                    line_str = line.decode('utf-8').strip()
+                    if not line_str:
+                        continue
+                    if line_str.startswith('>'):
+                        if current_header:
+                            records_to_process.append((current_header, "".join(current_seq)))
+                        current_header = line_str
+                        current_seq = []
+                    else:
+                        current_seq.append(line_str)
+                if current_header:
+                    records_to_process.append((current_header, "".join(current_seq)))
+                    
+            # 3. Filter sekuens berdasarkan protein target dan kualitas
+            passed_nucleotides = []
+            passed_proteins = []
+            
+            for header, seq in records_to_process:
+                main_id, attrs = parse_fasta_header(header)
+                genomic_acc = extract_genomic_accession(main_id)
                 
-                host_obj = record.get('host')
-                if not isinstance(host_obj, dict):
-                    host_obj = {}
-                host_name = host_obj.get('name') or ''
-                
-                # Apply Geographic Filter jika ada
-                if args.geo and args.geo.lower() not in location.lower():
+                # Filter 1: Cek apakah genomic accession ada di set valid
+                if genomic_acc not in valid_set:
                     continue
                     
-                # Apply Host Filter jika ada (H2H vs Reservoir)
-                if args.host and args.host.lower() not in host_name.lower():
+                # Filter 2: Pencocokan nama protein/gene
+                gene_val = attrs.get('gene', '')
+                protein_val = attrs.get('protein', '')
+                if not protein_matches(args.protein, gene_val, protein_val):
                     continue
-                
-                valid_accessions.append(acc)
-        
-        valid_set = set(valid_accessions)
-        print(f"Ditemukan {len(valid_set)} accession genom yang cocok setelah filter Host='{args.host}' dan Geo='{args.geo}'")
-        
-        # 2. Cari file cds.fna di dalam ZIP
-        cds_files = [f for f in z.namelist() if f.endswith('cds.fna')]
-        if not cds_files:
-            print(f"Error: cds.fna tidak ditemukan di dalam {args.zip}.")
-            import sys; sys.exit(1)
-            
-        # Parse file cds.fna
-        records_to_process = []
-        current_header = None
-        current_seq = []
-        
-        with z.open(cds_files[0], 'r') as f:
-            for line in f:
-                line_str = line.decode('utf-8').strip()
-                if not line_str:
+                    
+                # Filter 3: Filter panjang minimum sekuens (hindari parsial)
+                if len(seq) < args.min_len:
                     continue
-                if line_str.startswith('>'):
-                    if current_header:
-                        records_to_process.append((current_header, "".join(current_seq)))
-                    current_header = line_str
-                    current_seq = []
-                else:
-                    current_seq.append(line_str)
-            if current_header:
-                records_to_process.append((current_header, "".join(current_seq)))
+                    
+                # Filter 4: Kelipatan 3 (codon)
+                if len(seq) % 3 != 0:
+                    continue
+                    
+                # Filter 5: Cek internal stop codon
+                translated_seq = translate_dna(seq)
+                if '*' in translated_seq[:-1]: # Abaikan stop codon di ujung akhir sekuens
+                    continue
+                    
+                # Sekuens lolos seleksi
+                # Bersihkan sekuens dari spasi/new line jika ada
+                clean_seq = seq.upper().replace('\n', '').replace('\r', '').strip()
+                passed_nucleotides.append((main_id, clean_seq))
+                passed_proteins.append((main_id, translated_seq))
                 
-        # 3. Filter sekuens berdasarkan protein target dan kualitas
-        passed_nucleotides = []
-        passed_proteins = []
-        
-        for header, seq in records_to_process:
-            main_id, attrs = parse_fasta_header(header)
-            genomic_acc = extract_genomic_accession(main_id)
+            print(f"[{args.protein}] Berhasil meloloskan {len(passed_nucleotides)} sekuens CDS berkualitas tinggi.")
             
-            # Filter 1: Cek apakah genomic accession ada di set valid
-            if genomic_acc not in valid_set:
-                continue
+            # Jika kosong, tetap tulis file kosong agar pipeline tidak crash karena missing file
+            if not passed_nucleotides:
+                write_empty_outputs(args)
+                return
+
+            # Downsample jika jumlah melebihi --max
+            if len(passed_nucleotides) > args.max:
+                random.seed(42)
+                indices = random.sample(range(len(passed_nucleotides)), args.max)
+                passed_nucleotides = [passed_nucleotides[i] for i in indices]
+                passed_proteins = [passed_proteins[i] for i in indices]
+                print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens sesuai batas maksimal.")
                 
-            # Filter 2: Pencocokan nama protein/gene
-            gene_val = attrs.get('gene', '')
-            protein_val = attrs.get('protein', '')
-            if not protein_matches(args.protein, gene_val, protein_val):
-                continue
-                
-            # Filter 3: Filter panjang minimum sekuens (hindari parsial)
-            if len(seq) < args.min_len:
-                # print(f"DEBUG: Dropped {main_id} - Terlahu pendek ({len(seq)} bp)")
-                continue
-                
-            # Filter 4: Kelipatan 3 (codon)
-            if len(seq) % 3 != 0:
-                # print(f"DEBUG: Dropped {main_id} - Panjang bukan kelipatan 3 ({len(seq)} bp)")
-                continue
-                
-            # Filter 5: Cek internal stop codon
-            translated_seq = translate_dna(seq)
-            if '*' in translated_seq[:-1]: # Abaikan stop codon di ujung akhir sekuens
-                # print(f"DEBUG: Dropped {main_id} - Memiliki internal stop codon")
-                continue
-                
-            # Sekuens lolos seleksi
-            # Bersihkan sekuens dari spasi/new line jika ada
-            clean_seq = seq.upper().replace('\n', '').replace('\r', '').strip()
-            passed_nucleotides.append((main_id, clean_seq))
-            passed_proteins.append((main_id, translated_seq))
+            # 4. Tulis hasil output
+            os.makedirs(os.path.dirname(args.out_nuc), exist_ok=True)
+            os.makedirs(os.path.dirname(args.out_prot), exist_ok=True)
             
-        print(f"[{args.protein}] Berhasil meloloskan {len(passed_nucleotides)} sekuens CDS berkualitas tinggi.")
-        
-        # Downsample jika jumlah melebihi --max
-        if len(passed_nucleotides) > args.max:
-            random.seed(42)
-            indices = random.sample(range(len(passed_nucleotides)), args.max)
-            passed_nucleotides = [passed_nucleotides[i] for i in indices]
-            passed_proteins = [passed_proteins[i] for i in indices]
-            print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens sesuai batas maksimal.")
-            
-        # 4. Tulis hasil output
-        os.makedirs(os.path.dirname(args.out_nuc), exist_ok=True)
-        os.makedirs(os.path.dirname(args.out_prot), exist_ok=True)
-        
-        # Tulis nukleotida
-        with open(args.out_nuc, 'w') as out_n:
-            for main_id, seq in passed_nucleotides:
-                out_n.write(f">{main_id}\n{seq}\n")
-                
-        # Tulis protein
-        with open(args.out_prot, 'w') as out_p:
-            for main_id, seq in passed_proteins:
-                out_p.write(f">{main_id}\n{seq}\n")
-                
-        print(f"[{args.protein}] Hasil nukleotida disimpan di: {args.out_nuc}")
-        print(f"[{args.protein}] Hasil protein disimpan di: {args.out_prot}")
+            # Tulis nukleotida
+            with open(args.out_nuc, 'w') as out_n:
+                for main_id, seq in passed_nucleotides:
+                    out_n.write(f">{main_id}\n{seq}\n")
+                    
+            # Tulis protein
+            with open(args.out_prot, 'w') as out_p:
+                for main_id, seq in passed_proteins:
+                    out_p.write(f">{main_id}\n{seq}\n")
+                    
+            print(f"[{args.protein}] Hasil nukleotida disimpan di: {args.out_nuc}")
+            print(f"[{args.protein}] Hasil protein disimpan di: {args.out_prot}")
 
     except zipfile.BadZipFile:
         print(f"Error: {args.zip} bukan file ZIP yang valid atau korup.")

@@ -7,18 +7,33 @@ rule download_genomes:
     benchmark:
         WORKDIR + "/benchmarks/download_genomes/{virus}.tsv"
     params:
-        taxon_id=lambda wildcards: config["viruses"][wildcards.virus]["taxon_id"]
+        taxon_id=lambda wildcards: config["viruses"][wildcards.virus]["taxon_id"],
+        ncbi_api_key=os.environ.get("NCBI_API_KEY", "")
     resources:
         ncbi_api=1
     conda:
         "../envs/download.yaml"
     shell:
         """
-        echo "Starting download for {wildcards.virus} (Taxon: {params.taxon_id})" > {log}
+        if [ -n "{params.ncbi_api_key}" ]; then
+            export NCBI_API_KEY="{params.ncbi_api_key}"
+            echo "Using NCBI_API_KEY from environment" > {log}
+        else
+            echo "Warning: NCBI_API_KEY is not set" > {log}
+        fi
+        
+        echo "Starting download for {wildcards.virus} (Taxon: {params.taxon_id})" >> {log}
         datasets download virus genome taxon {params.taxon_id} \
             --include genome,protein,cds,annotation \
             --filename {output.zip} >> {log} 2>&1
-        echo "Download complete." >> {log}
+        
+        if [ -f "{output.zip}" ]; then
+            echo "Download complete. File size: $(du -sh {output.zip} | cut -f1)" >> {log}
+            echo "Contents of downloaded ZIP:" >> {log}
+            unzip -l {output.zip} >> {log} 2>&1 || echo "Warning: unzip -l failed" >> {log}
+        else
+            echo "Error: Downloaded ZIP file {output.zip} was not created!" >> {log}
+        fi
         """
 
 rule filter_and_extract_cds:
