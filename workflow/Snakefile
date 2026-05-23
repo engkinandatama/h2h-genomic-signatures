@@ -11,18 +11,21 @@ for v in VIRUSES:
 # Define WORKDIR based on config to isolate runs per project name
 WORKDIR = f"{config['outdir']}/{config['project_name']}"
 
+# Menyiapkan list target spesifik agar tidak terjadi kombinasi silang (cross-product) antar virus dan protein
+TARGETS = []
+for v in VIRUSES:
+    for p in PROTEINS[v]:
+        TARGETS.append(f"{WORKDIR}/04_selection/{v}/{p}_selection_results.txt")
+        TARGETS.append(f"{WORKDIR}/05_structure/{v}/{p}_3d_view.html")
+        
+# Tambahkan target final statistik
+TARGETS.append(f"{WORKDIR}/06_statistics/convergent_signature_matrix.csv")
+TARGETS.append(f"{WORKDIR}/06_statistics/jaccard_similarity_heatmap.png")
+TARGETS.append(f"{WORKDIR}/06_statistics/selection_phenotype_correlation.png")
+
 rule all:
     input:
-        # Menentukan output akhir yang diharapkan dari pipeline
-        expand(WORKDIR + "/04_selection/{virus}/{protein}_selection_results.txt",
-               virus=VIRUSES,
-               protein=[p for v in VIRUSES for p in PROTEINS[v]]),
-        expand(WORKDIR + "/05_structure/{virus}/{protein}_3d_view.html",
-               virus=VIRUSES,
-               protein=[p for v in VIRUSES for p in PROTEINS[v]]),
-        WORKDIR + "/06_statistics/convergent_signature_matrix.csv",
-        WORKDIR + "/06_statistics/jaccard_similarity_heatmap.png",
-        WORKDIR + "/06_statistics/selection_phenotype_correlation.png"
+        TARGETS
 
 # Include rule modules
 include: "rules/01_fetch_and_qc.smk"
