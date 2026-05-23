@@ -52,7 +52,7 @@ rule hyphy_meme:
             --tree {input.tree} \
             --output {output.json} \
             --cpu {threads} \
-            --branches Foreground >> {log} 2>&1 || (echo '{}' > {output.json} && echo "Warning: HyPhy MEME failed, created empty JSON" >> {log})
+            --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy MEME failed, created empty JSON" >> {log})
         """
 
 rule hyphy_fel:
@@ -85,7 +85,7 @@ rule hyphy_fel:
             --tree {input.tree} \
             --output {output.json} \
             --cpu {threads} \
-            --branches Foreground >> {log} 2>&1 || (echo '{}' > {output.json} && echo "Warning: HyPhy FEL failed, created empty JSON" >> {log})
+            --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FEL failed, created empty JSON" >> {log})
         """
 
 rule hyphy_fubar:
@@ -117,7 +117,7 @@ rule hyphy_fubar:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --cpu {threads} >> {log} 2>&1 || (echo '{}' > {output.json} && echo "Warning: HyPhy FUBAR failed, created empty JSON" >> {log})
+            --cpu {threads} >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FUBAR failed, created empty JSON" >> {log})
         """
 
 rule aggregate_selection:

@@ -47,14 +47,14 @@ viruses:
   Puumala_virus_Spillover:
     family: "Hantaviridae"
     category: "Spillover"
-    taxon_id: "286283"  # Puumala orthohantavirus (updated from old ID 11606)
+    taxon_id: "3052493"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Homo sapiens"
     uniprot_id: "P27313"
     proteins: ["GnGc", "L_protein"]
   Puumala_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
-    taxon_id: "286283"  # Puumala orthohantavirus (updated from old ID 11606)
+    taxon_id: "3052493"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Myodes" # Rodent reservoir
     uniprot_id: "P27313"
     proteins: ["GnGc", "L_protein"]
