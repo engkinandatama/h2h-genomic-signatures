@@ -85,7 +85,7 @@ def protein_matches(target, gene_val, protein_val):
         return any(x in protein_val for x in ["polymerase", "large protein", "l protein", "rdrp", "transcriptase"]) or gene_val == "l" or "polymerase" in gene_val
     elif target == "g_protein":
         # Nipah G protein (Attachment glycoprotein)
-        return any(x in protein_val for x in ["glycoprotein g", "attachment", "g protein", "g-protein"]) or gene_val == "g"
+        return any(x in protein_val for x in ["glycoprotein g", "attachment", "g protein", "g-protein", "receptor-binding"]) or (gene_val == "g") or (protein_val == "glycoprotein")
     elif target == "f_protein":
         # Nipah F protein (Fusion glycoprotein)
         return any(x in protein_val for x in ["fusion", "f protein", "f-protein"]) or gene_val == "f"
@@ -164,8 +164,10 @@ def main():
                         continue
                         
                     # Apply Host Filter jika ada (H2H vs Reservoir)
-                    if args.host and args.host.lower() not in host_name.lower():
-                        continue
+                    if args.host:
+                        host_keywords = [k.strip().lower() for k in args.host.split('|')]
+                        if not any(k in host_name.lower() for k in host_keywords):
+                            continue
                     
                     valid_accessions.append(acc)
             
