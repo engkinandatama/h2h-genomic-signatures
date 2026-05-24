@@ -2,6 +2,9 @@ configfile: "config/config.yaml"
 
 import os
 
+# Set environment variable globally to treat HyPhy numerical errors as warnings
+os.environ["TOLERATE_NUMERICAL_ERRORS"] = "1"
+
 # Membaca konfigurasi dari config.yaml
 VIRUSES      = config["viruses"].keys()
 VIRUS_GROUPS = config["virus_groups"].keys()

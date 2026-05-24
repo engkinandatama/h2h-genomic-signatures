@@ -19,14 +19,14 @@ viruses:
     category: "H2H"
     taxon_id: "1980456"  # Andes orthohantavirus (updated from old ID 11608)
     host_filter: "Homo sapiens"
-    uniprot_id: "Q8B8K7"
+    uniprot_id: "Q9E006"
     proteins: ["GnGc", "L_protein"]
   Andes_virus_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
     taxon_id: "1980456"  # Andes orthohantavirus (updated from old ID 11608)
     host_filter: "Oligoryzomys|Necromys|Akodon" # Expanded rodent reservoir
-    uniprot_id: "Q8B8K7"
+    uniprot_id: "Q9E006"
     proteins: ["GnGc", "L_protein"]
     
   Sin_Nombre_virus_Spillover:
@@ -94,14 +94,14 @@ viruses:
     category: "H2H"
     taxon_id: "186538"
     host_filter: "Homo sapiens"
-    uniprot_id: "P87666"
+    uniprot_id: "Q05320"
     proteins: ["GP", "L_protein"]
   Ebola_Zaire_Reservoir:
     family: "Filoviridae"
     category: "Reservoir"
     taxon_id: "186538"
     host_filter: "Macaca|Gorilla|Pan troglodytes|bat|Bat" # Non-human hosts including primates
-    uniprot_id: "P87666"
+    uniprot_id: "Q05320"
     proteins: ["GP", "L_protein"]
 
 virus_groups:
@@ -109,9 +109,9 @@ virus_groups:
     viruses: ["Andes_virus_H2H", "Andes_virus_Reservoir"]
     proteins: ["GnGc", "L_protein"]
     family: "Hantaviridae"
-    uniprot_id: "Q8B8K7"  # fallback (GnGc)
+    uniprot_id: "Q9E006"  # fallback (GnGc)
     uniprot_ids:           # per-protein AlphaFold mapping
-      GnGc: "Q8B8K7"      # Andes virus envelope polyprotein (Gn+Gc)
+      GnGc: "Q9E006"      # Andes virus envelopment polyprotein (Gn+Gc)
       L_protein: "Q9E005"  # Andes virus RNA-directed RNA polymerase L
   Sin_Nombre_virus:
     viruses: ["Sin_Nombre_virus_Spillover", "Sin_Nombre_Reservoir"]
@@ -151,10 +151,10 @@ virus_groups:
     viruses: ["Ebola_Zaire_H2H", "Ebola_Zaire_Reservoir"]
     proteins: ["GP", "L_protein"]
     family: "Filoviridae"
-    uniprot_id: "P87666"  # fallback (GP)
+    uniprot_id: "Q05320"  # fallback (GP)
     uniprot_ids:
-      GP: "P87666"         # Ebola Zaire envelope glycoprotein (Kikwit-95 strain)
-      L_protein: "Q6V1Q2" # Ebola Zaire RNA-directed RNA polymerase L (Kikwit-95 strain)
+      GP: "Q05320"         # Envelope glycoprotein (Mayinga-76 strain)
+      L_protein: "Q05318" # RNA-directed RNA polymerase L (Mayinga-76 strain)
 
 params:
   mafft: "--auto --maxiterate 1000"

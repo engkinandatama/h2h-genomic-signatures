@@ -49,10 +49,10 @@ def collapse_low_bootstrap_nodes(newick_str, threshold):
         try:
             val = float(label)
             if 0 <= val <= 100:
-                return "" if val < threshold else label
+                return ")" if val < threshold else f"){label}"
         except ValueError:
             pass
-        return label
+        return f"){label}"
 
     # Match: content between ')' and ':' that looks like a bootstrap number
     filtered = re.sub(r"\)([A-Za-z0-9_.]*?)(?=:)", replace_internal_label, newick_str)

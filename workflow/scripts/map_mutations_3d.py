@@ -35,21 +35,43 @@ def read_selection_sites(results_path):
     return sites
 
 def download_alphafold_pdb(uniprot_id, temp_path):
-    # Endpoint AlphaFold DB
-    url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb"
-    print(f"Mencoba mengunduh PDB AlphaFold dari: {url}")
+    import json
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
+    # 1. Coba query API AlphaFold terlebih dahulu untuk mendapatkan URL PDB yang dinamis
+    api_url = f"https://alphafold.ebi.ac.uk/api/prediction/{uniprot_id}"
+    print(f"Mengkueri API AlphaFold untuk UniProt ID {uniprot_id}...")
     try:
-        # Gunakan urllib dengan custom user-agent agar tidak diblokir
-        req = urllib.request.Request(
-            url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        with urllib.request.urlopen(req) as response, open(temp_path, 'wb') as out_file:
+        req = urllib.request.Request(api_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            if data and isinstance(data, list):
+                # Cari entri yang cocok atau gunakan entri pertama
+                entry = data[0]
+                pdb_url = entry.get("pdbUrl")
+                if pdb_url:
+                    print(f"Mencoba mengunduh PDB dari API URL: {pdb_url}")
+                    pdb_req = urllib.request.Request(pdb_url, headers=headers)
+                    with urllib.request.urlopen(pdb_req, timeout=15) as pdb_resp, open(temp_path, 'wb') as out_file:
+                        out_file.write(pdb_resp.read())
+                    print(f"PDB berhasil diunduh ke {temp_path}")
+                    return True
+    except Exception as e:
+        print(f"Peringatan: Gagal kueri API AlphaFold untuk {uniprot_id}: {e}")
+
+    # 2. Fallback ke URL hardcoded model_v4 jika API gagal
+    url = f"https://alphafold.ebi.ac.uk/files/AF-{uniprot_id}-F1-model_v4.pdb"
+    print(f"Mencoba fallback unduh PDB dari URL statis: {url}")
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as response, open(temp_path, 'wb') as out_file:
             out_file.write(response.read())
-        print(f"PDB berhasil diunduh ke {temp_path}")
+        print(f"PDB berhasil diunduh via fallback ke {temp_path}")
         return True
     except Exception as e:
-        print(f"Error: Gagal mengunduh PDB untuk UniProt {uniprot_id}: {e}")
+        print(f"Error: Gagal mengunduh PDB untuk UniProt {uniprot_id} via fallback: {e}")
         return False
 
 def generate_fallback_pdb(out_path, uniprot_id):
