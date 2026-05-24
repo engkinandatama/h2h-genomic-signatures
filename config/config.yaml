@@ -142,7 +142,7 @@ params:
   hyphy:
     pvalue_threshold: 0.05       # Threshold p-value untuk MEME dan FEL
     fubar_pp_threshold: 0.90     # Posterior probability threshold untuk FUBAR (rekomendasi > 0.90)
-    min_methods: 2               # Minimal metode yang signifikan (dari 3) agar site dinyatakan positif
+    min_methods: 1               # Diubah ke 1 agar menangkap situs seleksi episodik (MEME) yang sangat penting untuk adaptasi host
     methods: ["MEME", "FEL", "FUBAR"]
 
 # Alokasi resource per task (Otomatis menyesuaikan dengan snakemake -c 64)
