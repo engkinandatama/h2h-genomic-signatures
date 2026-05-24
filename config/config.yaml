@@ -158,12 +158,14 @@ virus_groups:
 
 params:
   mafft: "--auto --maxiterate 1000"
+  bootstrap_threshold: 70     # Collapse internal branches with bootstrap < 70 before selection analyses
   iqtree: "-m TEST -B 1000"
   hyphy:
     pvalue_threshold: 0.05       # Threshold p-value untuk MEME dan FEL
     fubar_pp_threshold: 0.90     # Posterior probability threshold untuk FUBAR (rekomendasi > 0.90)
     min_methods: 1               # Diubah ke 1 agar menangkap situs seleksi episodik (MEME) yang sangat penting untuk adaptasi host
-    methods: ["MEME", "FEL", "FUBAR"]
+    contrast_fel_fdr: 0.20       # FDR threshold untuk Contrast-FEL (lebih liberal karena test dua arah)
+    methods: ["MEME", "FEL", "FUBAR", "SLAC", "Contrast-FEL", "PRIME", "BUSTED", "aBSREL", "RELAX"]
 
 # Alokasi resource per task (Otomatis menyesuaikan dengan snakemake -c 64)
 resources:

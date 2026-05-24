@@ -3,7 +3,7 @@ configfile: "config/config.yaml"
 import os
 
 # Membaca konfigurasi dari config.yaml
-VIRUSES = config["viruses"].keys()
+VIRUSES      = config["viruses"].keys()
 VIRUS_GROUPS = config["virus_groups"].keys()
 
 # Define WORKDIR based on config to isolate runs per project name
@@ -15,34 +15,52 @@ TARGETS = []
 # Target per virus group dan protein
 for vg in VIRUS_GROUPS:
     for p in config["virus_groups"][vg]["proteins"]:
-        # Hasil positive selection (site-level)
+        # ── Site-level selection results (original 3 methods) ──────────────
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_meme_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fel_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fubar_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_complete.tsv")
-        # Branch-specific selection analysis (host-range change signatures)
+
+        # ── Recombination detection (GARD) ─────────────────────────────────
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_gard.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_gard_summary.txt")
+
+        # ── Branch-specific selection (BUSTED, aBSREL, RELAX) ────────────
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_busted.json")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_absrel.json")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_relax.json")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_branch_selection.tsv")
-        # Visualisasi 3D
+
+        # ── Additional site-level analyses (SLAC, Contrast-FEL, PRIME) ────
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_slac.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_contrast_fel.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_prime.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_all_sites.tsv")
+
+        # ── 3D Structure visualization ──────────────────────────────────────
         TARGETS.append(f"{WORKDIR}/05_structure/{vg}/{p}_3d_view.html")
-        
-# Tambahkan target final statistik
+
+        # ── Manhattan plot ──────────────────────────────────────────────────
+        TARGETS.append(f"{WORKDIR}/07_figures/{vg}/{p}_manhattan.png")
+
+# ── Convergence statistics (one file for all groups) ───────────────────────
 TARGETS.append(f"{WORKDIR}/06_statistics/convergent_signature_matrix.csv")
 TARGETS.append(f"{WORKDIR}/06_statistics/jaccard_similarity_heatmap.png")
 TARGETS.append(f"{WORKDIR}/06_statistics/selection_phenotype_correlation.png")
+
 
 rule all:
     input:
         TARGETS
 
-# Include rule modules
+
+# Include rule modules (order matters for DAG)
 include: "rules/01_fetch_and_qc.smk"
 include: "rules/02b_merge_alignment.smk"
 include: "rules/02_alignment.smk"
 include: "rules/03_phylogeny.smk"
+include: "rules/03b_gard.smk"          # GARD — recombination detection (after alignment)
 include: "rules/04_selection.smk"
 include: "rules/05_structural_mapping.smk"
 include: "rules/06_statistics_convergence.smk"
