@@ -25,7 +25,8 @@ rule hyphy_gard:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:

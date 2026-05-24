@@ -177,10 +177,27 @@ resources:
     mafft: 4000
     iqtree: 16000
     hyphy: 8000
-  # Max HyPhy jobs yang boleh jalan bersamaan
-  # Dengan hyphy=8 threads tiap job dan cores=64:
-  # 64 / 8 = max 8 job — tapi kalau jalan bersamaan dengan IQ-TREE (16 threads)
-  # maka batas aman = (64 - 16) / 8 = 6 jobs
-  # Gunakan flag: --resources hyphy_jobs=6 saat memanggil snakemake
-  hyphy_jobs: 6
 
+  # ─── RESOURCE TOKEN STRATEGY (penting untuk mencegah CPU meledak!) ──────
+  #
+  # Snakemake --cores hanya mengontrol jumlah JOB SLOT, bukan total thread.
+  # Tool seperti IQ-TREE dan HyPhy spawn internal threads secara mandiri,
+  # sehingga tanpa resource token tambahan, total CPU bisa jauh melampaui --cores.
+  #
+  # Solusi: gunakan 2 resource token eksplisit saat memanggil snakemake:
+  #
+  #   --resources ncbi_api=5 hyphy_jobs=6 iqtree_jobs=2
+  #
+  # Perhitungan aman untuk --cores 64:
+  #   IQ-TREE  : 2 jobs × 16 threads = 32 threads
+  #   HyPhy    : 6 jobs × 8 threads  = 48 threads
+  #   Worst case (keduanya jalan bersamaan): 32 + 48 = 80 threads (bisa sesekali peak)
+  #
+  # Untuk budget ketat 64 threads murni, pakai:
+  #   iqtree_jobs=2 dan hyphy_jobs=4  → 2×16 + 4×8 = 32+32 = 64 threads max
+  #
+  # Rekomendasi perintah final:
+  #   snakemake --cores 64 --resources ncbi_api=5 hyphy_jobs=4 iqtree_jobs=2 --use-conda --rerun-incomplete
+  #
+  hyphy_jobs: 4
+  iqtree_jobs: 2

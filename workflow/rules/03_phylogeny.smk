@@ -11,7 +11,8 @@ rule build_tree:
     threads:
         config.get("resources", {}).get("threads", {}).get("iqtree", 16)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("iqtree", 16000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("iqtree", 16000),
+        iqtree_jobs=1
     params:
         iqtree_args=config["params"]["iqtree"],
         prefix=WORKDIR + "/03_trees/{virus_group}/{protein}_tree"
