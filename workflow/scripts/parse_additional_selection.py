@@ -112,44 +112,71 @@ def parse_fubar(data, pp_thresh):
 
 def parse_slac(data, pval_thresh):
     """
-    SLAC MLE headers (typical order):
-      0: ES (expected synonymous)
-      1: EN (expected non-synonymous)
-      2: S  (observed synonymous)
-      3: N  (observed non-synonymous)
-      4: dS
-      5: dN
-      6: dN-dS
-      7: p-value (dN > dS)  ← positive selection
-      8: p-value (dS > dN)  ← negative selection
-    Returns {site: {ds, dn, dndS, p_pos, p_neg}}
+    SLAC MLE headers (actual order in HyPhy JSON):
+      0: ES  (expected synonymous)
+      1: EN  (expected non-synonymous)
+      2: S   (observed synonymous)
+      3: N   (observed non-synonymous)
+      4: P[S] (expected proportion synonymous)
+      5: dS
+      6: dN
+      7: dN-dS
+      8: P[dN/dS > 1]  <- positive selection p-value
+      9: P[dN/dS < 1]  <- negative selection p-value
+     10: Total branch length
+    Returns {site: {slac_ds, slac_dn, slac_dndS, slac_p, slac_np}}
+
+    CRITICAL: SLAC JSON nests per-site data as:
+      MLE.content['0']['by-site']['AVERAGED']  -> list of per-site rows
+    Do NOT use extract_rows() here — the outer dict has 'by-branch'/'by-site'
+    string keys, not numeric keys.
     """
     if not data or "MLE" not in data:
         return {}
     mle = data["MLE"]
-    headers = mle.get("headers", [])
-    rows = extract_rows(mle.get("content", {}))
+    content = mle.get("content", {})
+    partition = content.get("0", {})
 
-    ds_idx  = find_col(headers, ["ds", "synonymous rate"], 4)
-    dn_idx  = find_col(headers, ["dn", "non-synonymous rate"], 5)
-    dif_idx = find_col(headers, ["dn-ds", "dndS", "dn - ds"], 6)
-    pp_idx  = find_col(headers, ["p-value (dn>ds)", "p-value (dn > ds)", "positive"], 7)
-    np_idx  = find_col(headers, ["p-value (ds>dn)", "p-value (ds > dn)", "negative"], 8)
+    # Navigate to per-site data
+    if not isinstance(partition, dict):
+        return {}
+    by_site = partition.get("by-site", {})
+    if not isinstance(by_site, dict):
+        return {}
+    rows = by_site.get("AVERAGED", [])
+    if not rows:
+        return {}
+
+    # Fixed column indices (verified against SLAC JSON headers)
+    ds_idx  = 5   # dS
+    dn_idx  = 6   # dN
+    dif_idx = 7   # dN-dS
+    pp_idx  = 8   # P[dN/dS > 1] — positive selection
+    np_idx  = 9   # P[dN/dS < 1] — negative selection
+
+    def _safe(v, default="NA"):
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
 
     out = {}
     for i, row in enumerate(rows):
         try:
             out[i + 1] = {
-                "slac_ds":   float(row[ds_idx])  if len(row) > ds_idx  else "NA",
-                "slac_dn":   float(row[dn_idx])  if len(row) > dn_idx  else "NA",
-                "slac_dndS": float(row[dif_idx]) if len(row) > dif_idx else "NA",
-                "slac_p":    float(row[pp_idx])  if len(row) > pp_idx  else 1.0,
-                "slac_np":   float(row[np_idx])  if len(row) > np_idx  else 1.0,
+                "slac_ds":   _safe(row[ds_idx])  if len(row) > ds_idx  else "NA",
+                "slac_dn":   _safe(row[dn_idx])  if len(row) > dn_idx  else "NA",
+                "slac_dndS": _safe(row[dif_idx]) if len(row) > dif_idx else "NA",
+                "slac_p":    _safe(row[pp_idx], default=1.0) if len(row) > pp_idx else 1.0,
+                "slac_np":   _safe(row[np_idx], default=1.0) if len(row) > np_idx else 1.0,
             }
-        except (TypeError, ValueError):
+        except (IndexError, TypeError, ValueError):
             out[i + 1] = {"slac_ds": "NA", "slac_dn": "NA", "slac_dndS": "NA",
                           "slac_p": 1.0, "slac_np": 1.0}
     return out
+
 
 
 def parse_contrast_fel(data, pval_thresh, fdr_thresh):
