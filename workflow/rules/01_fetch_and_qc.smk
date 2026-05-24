@@ -116,19 +116,14 @@ rule merge_and_deduplicate:
         "../envs/download.yaml"
     shell:
         """
-        echo "Merging and deduplicating nucleotides..." > {log}
+        echo "Merging and deduplicating nucleotides and proteins together..." > {log}
         python workflow/scripts/merge_fasta.py \
-            --ncbi {input.ncbi_fasta} \
-            --bvbrc {input.bvbrc_fasta} \
-            --out {output.fasta} \
+            --ncbi-nuc {input.ncbi_fasta} \
+            --ncbi-prot {input.ncbi_faa} \
+            --bvbrc-nuc {input.bvbrc_fasta} \
+            --bvbrc-prot {input.bvbrc_faa} \
+            --out-nuc {output.fasta} \
+            --out-prot {output.faa} \
             --max {params.max_seq} >> {log} 2>&1
-            
-        echo "Merging and deduplicating proteins..." >> {log}
-        python workflow/scripts/merge_fasta.py \
-            --ncbi {input.ncbi_faa} \
-            --bvbrc {input.bvbrc_faa} \
-            --out {output.faa} \
-            --max {params.max_seq} >> {log} 2>&1
-            
-        echo "Merge complete." >> {log}
+        echo "Merge and paired deduplication complete." >> {log}
         """

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import re
 
 def parse_fasta(file_path):
-    records = []
+    records = {}
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return records
         
@@ -17,14 +18,16 @@ def parse_fasta(file_path):
                 continue
             if line.startswith('>'):
                 if current_header:
-                    records.append((current_header, "".join(current_seq)))
+                    seq_id = current_header.split()[0].lstrip('>')
+                    records[seq_id] = (current_header, "".join(current_seq))
                 current_header = line
                 current_seq = []
             else:
                 current_seq.append(line)
                 
     if current_header:
-        records.append((current_header, "".join(current_seq)))
+        seq_id = current_header.split()[0].lstrip('>')
+        records[seq_id] = (current_header, "".join(current_seq))
         
     return records
 
@@ -39,54 +42,88 @@ def extract_accession(header):
         header = header.split('_cds_')[0]
     return header
 
-def merge_and_deduplicate(ncbi_file, bvbrc_file, output_file, max_seq):
-    ncbi_records = parse_fasta(ncbi_file)
-    bvbrc_records = parse_fasta(bvbrc_file)
+def merge_and_deduplicate_paired(ncbi_nuc_file, ncbi_prot_file, bvbrc_nuc_file, bvbrc_prot_file, out_nuc_file, out_prot_file, max_seq):
+    # Parse paired records for NCBI
+    ncbi_nuc_records = parse_fasta(ncbi_nuc_file)
+    ncbi_prot_records = parse_fasta(ncbi_prot_file)
+    
+    # Parse paired records for BV-BRC
+    bvbrc_nuc_records = parse_fasta(bvbrc_nuc_file)
+    bvbrc_prot_records = parse_fasta(bvbrc_prot_file)
+    
+    # Pair by ID
+    ncbi_ids = set(ncbi_nuc_records.keys()) & set(ncbi_prot_records.keys())
+    bvbrc_ids = set(bvbrc_nuc_records.keys()) & set(bvbrc_prot_records.keys())
     
     seen_accessions = set()
-    seen_sequences = set()
-    final_records = []
+    seen_nuc_sequences = set()
+    final_ids = []
+    final_nuc_records = {}
+    final_prot_records = {}
     
-    # Process NCBI first (usually our primary trusted source)
-    for header, seq in ncbi_records:
-        acc = extract_accession(header)
-        if acc not in seen_accessions and seq not in seen_sequences:
-            final_records.append((header, seq))
+    # Process NCBI first
+    for seq_id in ncbi_ids:
+        nuc_header, nuc_seq = ncbi_nuc_records[seq_id]
+        prot_header, prot_seq = ncbi_prot_records[seq_id]
+        
+        acc = extract_accession(nuc_header)
+        if acc not in seen_accessions and nuc_seq not in seen_nuc_sequences:
+            final_ids.append(seq_id)
+            final_nuc_records[seq_id] = (nuc_header, nuc_seq)
+            final_prot_records[seq_id] = (prot_header, prot_seq)
             seen_accessions.add(acc)
-            seen_sequences.add(seq)
+            seen_nuc_sequences.add(nuc_seq)
             
     # Process BV-BRC
     bvbrc_added = 0
-    for header, seq in bvbrc_records:
-        acc = extract_accession(header)
-        if acc not in seen_accessions and seq not in seen_sequences:
-            final_records.append((header, seq))
+    for seq_id in bvbrc_ids:
+        nuc_header, nuc_seq = bvbrc_nuc_records[seq_id]
+        prot_header, prot_seq = bvbrc_prot_records[seq_id]
+        
+        acc = extract_accession(nuc_header)
+        if acc not in seen_accessions and nuc_seq not in seen_nuc_sequences:
+            final_ids.append(seq_id)
+            final_nuc_records[seq_id] = (nuc_header, nuc_seq)
+            final_prot_records[seq_id] = (prot_header, prot_seq)
             seen_accessions.add(acc)
-            seen_sequences.add(seq)
+            seen_nuc_sequences.add(nuc_seq)
             bvbrc_added += 1
             
-    print(f"Merged {len(ncbi_records)} NCBI and {len(bvbrc_records)} BV-BRC records.")
+    print(f"Merged {len(ncbi_ids)} NCBI and {len(bvbrc_ids)} BV-BRC paired records.")
     print(f"Added {bvbrc_added} unique records from BV-BRC.")
-    print(f"Total unique records before sampling: {len(final_records)}")
+    print(f"Total unique records before sampling: {len(final_ids)}")
     
-    # Truncate to max_seq if needed (we shouldn't randomly downsample here unless required, 
-    # but the inputs are already downsampled to max_seq individually. If the sum exceeds max_seq, we cap it).
-    if len(final_records) > max_seq:
-        # Keep all from NCBI (up to max) and fill the rest with BV-BRC
-        final_records = final_records[:max_seq]
+    # Truncate to max_seq if needed
+    if len(final_ids) > max_seq:
+        final_ids = final_ids[:max_seq]
         print(f"Capped total records to {max_seq}.")
         
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    with open(output_file, 'w') as f:
-        for header, seq in final_records:
-            f.write(f"{header}\n{seq}\n")
+    os.makedirs(os.path.dirname(out_nuc_file), exist_ok=True)
+    os.makedirs(os.path.dirname(out_prot_file), exist_ok=True)
+    
+    with open(out_nuc_file, 'w') as fn, open(out_prot_file, 'w') as fp:
+        for seq_id in final_ids:
+            nuc_header, nuc_seq = final_nuc_records[seq_id]
+            prot_header, prot_seq = final_prot_records[seq_id]
+            fn.write(f"{nuc_header}\n{nuc_seq}\n")
+            fp.write(f"{prot_header}\n{prot_seq}\n")
+            
+    print(f"Successfully wrote paired outputs. Total: {len(final_ids)} sekuens.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Merge and deduplicate FASTA files from NCBI and BV-BRC")
-    parser.add_argument("--ncbi", required=True)
-    parser.add_argument("--bvbrc", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--max", type=int, default=100)
+    parser = argparse.ArgumentParser(description="Merge and deduplicate FASTA files from NCBI and BV-BRC while preserving matching nucleotide/protein sequences")
+    parser.add_argument("--ncbi-nuc", required=True, help="NCBI nucleotide FASTA path")
+    parser.add_argument("--ncbi-prot", required=True, help="NCBI protein FASTA path")
+    parser.add_argument("--bvbrc-nuc", required=True, help="BV-BRC nucleotide FASTA path")
+    parser.add_argument("--bvbrc-prot", required=True, help="BV-BRC protein FASTA path")
+    parser.add_argument("--out-nuc", required=True, help="Output nucleotide FASTA path")
+    parser.add_argument("--out-prot", required=True, help="Output protein FASTA path")
+    parser.add_argument("--max", type=int, default=100, help="Max sequences to output")
     args = parser.parse_args()
     
-    merge_and_deduplicate(args.ncbi, args.bvbrc, args.out, args.max)
+    merge_and_deduplicate_paired(
+        args.ncbi_nuc, args.ncbi_prot,
+        args.bvbrc_nuc, args.bvbrc_prot,
+        args.out_nuc, args.out_prot,
+        args.max
+    )

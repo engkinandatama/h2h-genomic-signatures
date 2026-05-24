@@ -105,6 +105,12 @@ def main():
         
         family, category = parse_group_metadata(virus_group)
         
+        # Check if the group was skipped in the pipeline (empty or missing codon alignment)
+        codon_aln_path = file_path.replace("04_selection", "02_aligned").replace("_selection_results.txt", "_codon_aligned.fasta")
+        if not os.path.exists(codon_aln_path) or os.path.getsize(codon_aln_path) == 0:
+            print(f"Information: {virus_group} - {protein} dilewati (insufficient sequences). Mengabaikan dari analisis statistik.", flush=True)
+            continue
+        
         # Baca situs terseleksi (baris di file hanya situs yang signifikan)
         sites = []
         with open(file_path, 'r') as f:
@@ -385,6 +391,10 @@ def main():
     group_rates = []
     for g in groups:
         g_df = df_results[df_results['virus_group'] == g]
+        if g_df.empty:
+            print(f"Warning: Tidak ada data hasil seleksi untuk {g}. Kelompok ini akan diabaikan dari korelasi Spearman.", flush=True)
+            continue
+            
         _, category = parse_group_metadata(g)
         score = 2 if category == "H2H" else 1 # H2H=2, Spillover=1
         
@@ -399,71 +409,99 @@ def main():
             'selection_rate': rate
         })
         
-    df_loo = pd.DataFrame(group_rates)
-    print("Data untuk korelasi Spearman:")
-    print(df_loo)
-    
-    # Hitung Spearman correlation observed
-    obs_rho, obs_p = spearmanr(df_loo['selection_rate'], df_loo['score'])
-    print(f"\nObserved Spearman Correlation: rho={obs_rho:.4f}, p-value={obs_p:.4f}")
-    
-    # Leave-One-Out Sensitivity Analysis
-    print("\nLeave-One-Out Sensitivity Analysis:")
-    loo_results = []
-    for excluded in groups:
-        sub_df = df_loo[df_loo['virus_group'] != excluded]
-        rho, p = spearmanr(sub_df['selection_rate'], sub_df['score'])
-        loo_results.append({
-            'excluded_virus': excluded,
-            'spearman_rho': rho,
-            'p_value': p
-        })
-    df_loo_res = pd.DataFrame(loo_results)
-    print(df_loo_res.to_string(index=False))
-    
-    # Plot Boxplot/Strip plot perbandingan rate H2H vs Spillover
-    plt.figure(figsize=(6, 5))
-    palette = {'H2H': '#ef4444', 'Spillover': '#f59e0b'}
-    
-    sns.boxplot(
-        data=df_loo, 
-        x='category', 
-        y='selection_rate', 
-        palette=palette,
-        hue='category',
-        legend=False,
-        width=0.4
-    )
-    sns.stripplot(
-        data=df_loo, 
-        x='category', 
-        y='selection_rate', 
-        color='black', 
-        alpha=0.8, 
-        size=8
-    )
-    
-    # Tampilkan teks Spearman di plot
-    stats_text = f"Spearman Correlation:\nrho = {obs_rho:.3f}\np-value = {obs_p:.3f}"
-    plt.text(
-        0.05, 0.95, 
-        stats_text, 
-        transform=plt.gca().transAxes, 
-        fontsize=10, 
-        verticalalignment='top',
-        bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')
-    )
-    
-    plt.title("Positive Selection Rates vs Transmission Phenotype", fontsize=11, pad=15)
-    plt.xlabel("Transmission Category (H2H score=2, Spillover score=1)", fontsize=10)
-    plt.ylabel("Pooled Selection Rate (Entry + Replication)", fontsize=10)
-    plt.ylim(0, max(df_loo['selection_rate']) * 1.3)
-    plt.tight_layout()
-    
-    os.makedirs(os.path.dirname(args.out_correlation) or ".", exist_ok=True)
-    plt.savefig(args.out_correlation, dpi=300)
-    plt.close()
-    print(f"Plot korelasi disimpan di: {args.out_correlation}")
+    if not group_rates:
+        print("\nWarning: Tidak ada data grup yang valid untuk analisis korelasi Level 4. Menulis plot kosong.")
+        # Create empty plot or skip saving
+        plt.figure(figsize=(6, 5))
+        plt.title("No Data Available for Positive Selection Rates vs Transmission Phenotype")
+        os.makedirs(os.path.dirname(args.out_correlation) or ".", exist_ok=True)
+        plt.savefig(args.out_correlation, dpi=300)
+        plt.close()
+    else:
+        df_loo = pd.DataFrame(group_rates)
+        print("Data untuk korelasi Spearman:")
+        print(df_loo)
+        
+        # Hitung Spearman correlation observed
+        obs_rho, obs_p = np.nan, np.nan
+        if len(df_loo) >= 2:
+            try:
+                obs_rho, obs_p = spearmanr(df_loo['selection_rate'], df_loo['score'])
+                print(f"\nObserved Spearman Correlation: rho={obs_rho:.4f}, p-value={obs_p:.4f}")
+            except Exception as e:
+                print(f"\nWarning: Gagal menghitung korelasi Spearman Observed: {e}")
+        else:
+            print("\nWarning: Data tidak mencukupi untuk menghitung korelasi Spearman Observed (butuh minimal 2 kelompok).")
+            
+        # Leave-One-Out Sensitivity Analysis
+        print("\nLeave-One-Out Sensitivity Analysis:")
+        loo_results = []
+        for excluded in groups:
+            # check if excluded is in df_loo
+            if excluded not in df_loo['virus_group'].values:
+                continue
+            sub_df = df_loo[df_loo['virus_group'] != excluded]
+            rho, p = np.nan, np.nan
+            if len(sub_df) >= 2:
+                try:
+                    rho, p = spearmanr(sub_df['selection_rate'], sub_df['score'])
+                except Exception as e:
+                    pass
+            loo_results.append({
+                'excluded_virus': excluded,
+                'spearman_rho': rho,
+                'p_value': p
+            })
+        if loo_results:
+            df_loo_res = pd.DataFrame(loo_results)
+            print(df_loo_res.to_string(index=False))
+        else:
+            print("Tidak ada hasil Leave-One-Out karena data kurang.")
+            
+        # Plot Boxplot/Strip plot perbandingan rate H2H vs Spillover
+        plt.figure(figsize=(6, 5))
+        palette = {'H2H': '#ef4444', 'Spillover': '#f59e0b'}
+        
+        sns.boxplot(
+            data=df_loo, 
+            x='category', 
+            y='selection_rate', 
+            palette=palette,
+            hue='category',
+            legend=False,
+            width=0.4
+        )
+        sns.stripplot(
+            data=df_loo, 
+            x='category', 
+            y='selection_rate', 
+            color='black', 
+            alpha=0.8, 
+            size=8
+        )
+        
+        # Tampilkan teks Spearman di plot
+        stats_text = f"Spearman Correlation:\nrho = {obs_rho:.3f}\np-value = {obs_p:.3f}"
+        plt.text(
+            0.05, 0.95, 
+            stats_text, 
+            transform=plt.gca().transAxes, 
+            fontsize=10, 
+            verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.9, edgecolor='gray')
+        )
+        
+        plt.title("Positive Selection Rates vs Transmission Phenotype", fontsize=11, pad=15)
+        plt.xlabel("Transmission Category (H2H score=2, Spillover score=1)", fontsize=10)
+        plt.ylabel("Pooled Selection Rate (Entry + Replication)", fontsize=10)
+        max_rate = df_loo['selection_rate'].max()
+        plt.ylim(0, (max_rate if pd.notna(max_rate) and max_rate > 0 else 0.01) * 1.3)
+        plt.tight_layout()
+        
+        os.makedirs(os.path.dirname(args.out_correlation) or ".", exist_ok=True)
+        plt.savefig(args.out_correlation, dpi=300)
+        plt.close()
+        print(f"Plot korelasi disimpan di: {args.out_correlation}")
 
 if __name__ == "__main__":
     main()

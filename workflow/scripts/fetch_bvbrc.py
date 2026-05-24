@@ -73,12 +73,15 @@ def bvbrc_get(endpoint, params_str, accept_header="application/json", retries=3)
                 else:
                     return raw.decode("utf-8")
         except urllib.error.HTTPError as e:
+            print(f"HTTP Error on attempt {attempt+1} for URL {url}: {e.code} - {e.reason}", flush=True)
             if attempt == retries - 1:
                 return None
+            time.sleep(2 ** attempt + random.random())
         except Exception as e:
+            print(f"Generic error on attempt {attempt+1} for URL {url}: {e}", flush=True)
             if attempt == retries - 1:
                 return None
-            time.sleep(2 ** attempt)
+            time.sleep(2 ** attempt + random.random())
     return None
 
 def fetch_genomes(taxon_id, geo_filter, host_filter):
@@ -92,7 +95,9 @@ def fetch_genomes(taxon_id, geo_filter, host_filter):
         data = bvbrc_get("genome", rql)
         
         if data is None:
-            break
+            print("Error: Gagal menghubungi API BV-BRC saat mengambil metadata genome. Menghentikan pipeline.", flush=True)
+            import sys
+            sys.exit(1)
             
         records = data if isinstance(data, list) else data.get("response", {}).get("docs", [])
         if not records:
@@ -179,7 +184,16 @@ def fetch_features(genome_ids, protein_target, min_len):
         
         # Fetch DNA and Protein FASTA in parallel/sequence
         dna_fasta = bvbrc_get("genome_feature", rql, accept_header="application/dna+fasta")
+        if dna_fasta is None:
+            print("Error: Gagal mengambil data sekuens DNA dari BV-BRC API. Menghentikan pipeline.", flush=True)
+            import sys
+            sys.exit(1)
+            
         prot_fasta = bvbrc_get("genome_feature", rql, accept_header="application/protein+fasta")
+        if prot_fasta is None:
+            print("Error: Gagal mengambil data sekuens Protein dari BV-BRC API. Menghentikan pipeline.", flush=True)
+            import sys
+            sys.exit(1)
         
         dna_records = parse_fasta(dna_fasta)
         prot_records = parse_fasta(prot_fasta)
