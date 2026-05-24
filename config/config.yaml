@@ -109,32 +109,52 @@ virus_groups:
     viruses: ["Andes_virus_H2H", "Andes_virus_Reservoir"]
     proteins: ["GnGc", "L_protein"]
     family: "Hantaviridae"
-    uniprot_id: "Q8B8K7" # Andes virus H2H representative UniProt ID
+    uniprot_id: "Q8B8K7"  # fallback (GnGc)
+    uniprot_ids:           # per-protein AlphaFold mapping
+      GnGc: "Q8B8K7"      # Andes virus envelope polyprotein (Gn+Gc)
+      L_protein: "Q9E005"  # Andes virus RNA-directed RNA polymerase L
   Sin_Nombre_virus:
     viruses: ["Sin_Nombre_virus_Spillover", "Sin_Nombre_Reservoir"]
     proteins: ["GnGc", "L_protein"]
     family: "Hantaviridae"
-    uniprot_id: "P33453" # Sin Nombre virus representative UniProt ID
+    uniprot_id: "Q89905"  # fallback (GnGc)
+    uniprot_ids:
+      GnGc: "Q89905"      # Sin Nombre virus envelopment polyprotein (Gn+Gc)
+      L_protein: "A0A0P0ALW1"  # Sin Nombre virus RNA-directed RNA polymerase L
   Puumala_virus:
     viruses: ["Puumala_virus_Spillover", "Puumala_Reservoir"]
     proteins: ["GnGc", "L_protein"]
     family: "Hantaviridae"
-    uniprot_id: "P27313" # Puumala virus representative UniProt ID
+    uniprot_id: "P27312"  # fallback (GnGc)
+    uniprot_ids:
+      GnGc: "P27312"      # Puumala virus envelopment polyprotein (Gn+Gc)
+      L_protein: "P0C760"  # Puumala virus RNA-directed RNA polymerase L
   Nipah_Bangladesh:
     viruses: ["Nipah_Bangladesh_H2H", "Nipah_Reservoir"]
     proteins: ["G_protein", "F_protein", "L_protein"]
     family: "Paramyxoviridae"
-    uniprot_id: "Q9IH62" # Nipah virus Bangladesh representative UniProt ID
+    uniprot_id: "Q9IH62"  # fallback (G protein)
+    uniprot_ids:
+      G_protein: "Q9IH62"  # Nipah virus attachment glycoprotein G
+      F_protein: "Q9IH63"  # Nipah virus fusion glycoprotein F
+      L_protein: "Q997F0"  # Nipah virus RNA-directed RNA polymerase L
   Nipah_Malaysia:
     viruses: ["Nipah_Malaysia_Spillover", "Nipah_Reservoir"]
     proteins: ["G_protein", "F_protein", "L_protein"]
     family: "Paramyxoviridae"
-    uniprot_id: "Q9IH62" # Nipah virus Malaysia representative UniProt ID
+    uniprot_id: "Q9IH62"  # fallback (G protein)
+    uniprot_ids:
+      G_protein: "Q9IH62"  # Nipah virus attachment glycoprotein G
+      F_protein: "Q9IH63"  # Nipah virus fusion glycoprotein F
+      L_protein: "Q997F0"  # Nipah virus RNA-directed RNA polymerase L
   Ebola_Zaire:
     viruses: ["Ebola_Zaire_H2H", "Ebola_Zaire_Reservoir"]
     proteins: ["GP", "L_protein"]
     family: "Filoviridae"
-    uniprot_id: "P87666" # Ebola Zaire H2H representative UniProt ID
+    uniprot_id: "P87666"  # fallback (GP)
+    uniprot_ids:
+      GP: "P87666"         # Ebola Zaire envelope glycoprotein (Kikwit-95 strain)
+      L_protein: "Q6V1Q2" # Ebola Zaire RNA-directed RNA polymerase L (Kikwit-95 strain)
 
 params:
   mafft: "--auto --maxiterate 1000"
