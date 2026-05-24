@@ -38,7 +38,8 @@ rule hyphy_meme:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -71,7 +72,8 @@ rule hyphy_fel:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -104,7 +106,8 @@ rule hyphy_fubar:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -185,7 +188,8 @@ rule hyphy_busted:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -201,7 +205,8 @@ rule hyphy_busted:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --branches Foreground >> {log} 2>&1 \
+            --branches Foreground \
+            --cpu {threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy BUSTED failed, created empty JSON" >> {log})
         """
 
@@ -225,7 +230,8 @@ rule hyphy_absrel:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -241,7 +247,8 @@ rule hyphy_absrel:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --branches Foreground >> {log} 2>&1 \
+            --branches Foreground \
+            --cpu {threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy aBSREL failed, created empty JSON" >> {log})
         """
 
@@ -266,7 +273,8 @@ rule hyphy_relax:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -283,7 +291,8 @@ rule hyphy_relax:
             --tree {input.tree} \
             --output {output.json} \
             --test Foreground \
-            --reference Reference >> {log} 2>&1 \
+            --reference Reference \
+            --cpu {threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy RELAX failed, created empty JSON" >> {log})
         """
 
@@ -341,7 +350,8 @@ rule hyphy_slac:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -388,7 +398,8 @@ rule hyphy_contrast_fel:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:
@@ -436,7 +447,8 @@ rule hyphy_prime:
     threads:
         config.get("resources", {}).get("threads", {}).get("hyphy", 8)
     resources:
-        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
+        hyphy_jobs=1
     conda:
         "../envs/selection.yaml"
     shell:

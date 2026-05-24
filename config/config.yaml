@@ -177,4 +177,10 @@ resources:
     mafft: 4000
     iqtree: 16000
     hyphy: 8000
+  # Max HyPhy jobs yang boleh jalan bersamaan
+  # Dengan hyphy=8 threads tiap job dan cores=64:
+  # 64 / 8 = max 8 job — tapi kalau jalan bersamaan dengan IQ-TREE (16 threads)
+  # maka batas aman = (64 - 16) / 8 = 6 jobs
+  # Gunakan flag: --resources hyphy_jobs=6 saat memanggil snakemake
+  hyphy_jobs: 6
 

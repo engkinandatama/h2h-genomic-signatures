@@ -51,7 +51,8 @@ rule hyphy_gard:
         hyphy gard \
             --alignment {input.codon_aln} \
             --output {output.json} \
-            --output-lf /dev/null >> {log} 2>&1 \
+            --output-lf /dev/null \
+            --cpu {threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: GARD failed" >> {log})
 
         # Parse JSON to write human-readable summary
