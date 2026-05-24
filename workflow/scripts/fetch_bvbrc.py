@@ -236,14 +236,14 @@ def main():
     args = parser.parse_args()
     
     valid_genome_ids = fetch_genomes(args.taxon, args.geo, args.host)
-    print(f"[{args.protein}] Ditemukan {len(valid_genome_ids)} genome ID yang cocok dari BV-BRC (Host: {args.host}, Geo: {args.geo}).")
+    print(f"[{args.protein}] Ditemukan {len(valid_genome_ids)} genome ID yang cocok dari BV-BRC (Host: {args.host}, Geo: {args.geo}).", flush=True)
     
     if not valid_genome_ids:
         write_empty_outputs(args.out_nuc, args.out_prot)
         return
         
     passed_nuc, passed_prot = fetch_features(valid_genome_ids, args.protein, args.min_len)
-    print(f"[{args.protein}] Berhasil mengekstrak {len(passed_nuc)} CDS valid dari BV-BRC.")
+    print(f"[{args.protein}] Berhasil mengekstrak {len(passed_nuc)} CDS valid dari BV-BRC.", flush=True)
     
     if not passed_nuc:
         write_empty_outputs(args.out_nuc, args.out_prot)
@@ -254,7 +254,7 @@ def main():
         indices = random.sample(range(len(passed_nuc)), args.max)
         passed_nuc = [passed_nuc[i] for i in indices]
         passed_prot = [passed_prot[i] for i in indices]
-        print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens.")
+        print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens.", flush=True)
         
     write_empty_outputs(args.out_nuc, args.out_prot) # ensure dirs exist
     

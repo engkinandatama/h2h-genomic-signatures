@@ -13,7 +13,7 @@ def main():
     args = parse_args()
     
     if len(args.inputs) != len(args.virus_names):
-        print("Error: Jumlah file input harus sama dengan jumlah nama virus.")
+        print("Error: Jumlah file input harus sama dengan jumlah nama virus.", flush=True)
         sys.exit(1)
         
     out_dir = os.path.dirname(args.output)
@@ -24,15 +24,15 @@ def main():
     with open(args.output, 'w') as out_f:
         for filepath, virus_name in zip(args.inputs, args.virus_names):
             if not os.path.exists(filepath):
-                print(f"Warning: File {filepath} tidak ditemukan. Dilewati.")
+                print(f"Warning: File {filepath} tidak ditemukan. Dilewati.", flush=True)
                 continue
                 
             # Cek jika file kosong
             if os.path.getsize(filepath) == 0:
-                print(f"Warning: File {filepath} kosong. Dilewati.")
+                print(f"Warning: File {filepath} kosong. Dilewati.", flush=True)
                 continue
                 
-            print(f"Membaca {filepath} untuk virus {virus_name}...")
+            print(f"Membaca {filepath} untuk virus {virus_name}...", flush=True)
             with open(filepath, 'r') as in_f:
                 current_header = None
                 current_seq = []
@@ -60,7 +60,7 @@ def main():
                     out_f.write(f">{virus_name}_{clean_header}\n{seq_str}\n")
                     total_seqs += 1
                     
-    print(f"Selesai menggabungkan. Total sekuens ditulis: {total_seqs} ke {args.output}")
+    print(f"Selesai menggabungkan. Total sekuens ditulis: {total_seqs} ke {args.output}", flush=True)
 
 if __name__ == "__main__":
     main()
