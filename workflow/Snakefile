@@ -6,6 +6,15 @@ import os
 VIRUSES      = config["viruses"].keys()
 VIRUS_GROUPS = config["virus_groups"].keys()
 
+# Get all unique protein names from the config to prevent wildcard ambiguities
+ALL_PROTEINS = set()
+for vg in config["virus_groups"].values():
+    ALL_PROTEINS.update(vg["proteins"])
+
+wildcard_constraints:
+    protein="|".join(ALL_PROTEINS),
+    virus_group="|".join(VIRUS_GROUPS)
+
 # Define WORKDIR based on config to isolate runs per project name
 WORKDIR = f"{config['outdir']}/{config['project_name']}"
 
