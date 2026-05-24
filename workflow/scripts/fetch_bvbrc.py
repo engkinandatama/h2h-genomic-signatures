@@ -175,7 +175,7 @@ def fetch_features(genome_ids, protein_target, min_len):
         # In RQL, genome_id list should NOT contain quotes, e.g. in(genome_id,(186538.100,186538.1000))
         genomes_str = ",".join(batch)
         
-        rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)"
+        rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)&limit(25000,0)"
         
         # Fetch DNA and Protein FASTA in parallel/sequence
         dna_fasta = bvbrc_get("genome_feature", rql, accept_header="application/dna+fasta")
