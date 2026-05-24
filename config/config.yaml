@@ -25,7 +25,7 @@ viruses:
     family: "Hantaviridae"
     category: "Reservoir"
     taxon_id: "1980456"  # Andes orthohantavirus (updated from old ID 11608)
-    host_filter: "Oligoryzomys" # Rodent reservoir
+    host_filter: "Oligoryzomys|Necromys|Akodon" # Expanded rodent reservoir
     uniprot_id: "Q8B8K7"
     proteins: ["GnGc", "L_protein"]
     
@@ -55,7 +55,7 @@ viruses:
     family: "Hantaviridae"
     category: "Reservoir"
     taxon_id: "3052493"  # Puumala orthohantavirus (updated from old ID 11606)
-    host_filter: "Myodes" # Rodent reservoir
+    host_filter: "Myodes|Clethrionomys" # Expanded rodent reservoir
     uniprot_id: "P27313"
     proteins: ["GnGc", "L_protein"]
 
@@ -82,7 +82,7 @@ viruses:
     family: "Paramyxoviridae"
     category: "Reservoir"
     taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
-    host_filter: "Pteropus" # Bat reservoir
+    host_filter: "Pteropus|Chiroptera" # Expanded bat reservoir
     uniprot_id: "Q9IH62"
     proteins: ["G_protein", "F_protein", "L_protein"]
     
@@ -100,7 +100,7 @@ viruses:
     family: "Filoviridae"
     category: "Reservoir"
     taxon_id: "186538"
-    host_filter: "Rousettus" # Bat reservoir
+    host_filter: "Macaca|Gorilla|Pan troglodytes|bat|Bat" # Non-human hosts including primates
     uniprot_id: "P87666"
     proteins: ["GP", "L_protein"]
 

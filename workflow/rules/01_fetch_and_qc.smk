@@ -36,16 +36,16 @@ rule download_genomes:
         fi
         """
 
-rule filter_and_extract_cds:
+rule filter_and_extract_cds_ncbi:
     input:
         zip=WORKDIR + "/01_raw_fasta/{virus}/{virus}_dataset.zip"
     output:
-        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta",
-        faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.faa"
+        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_ncbi.fasta",
+        faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_ncbi.faa"
     log:
-        WORKDIR + "/logs/filter_extract/{virus}_{protein}.log"
+        WORKDIR + "/logs/filter_extract_ncbi/{virus}_{protein}.log"
     benchmark:
-        WORKDIR + "/benchmarks/filter_extract/{virus}_{protein}.tsv"
+        WORKDIR + "/benchmarks/filter_extract_ncbi/{virus}_{protein}.tsv"
     params:
         geo_filter=lambda wildcards: config["viruses"][wildcards.virus].get("geo_filter", ""),
         host_filter=lambda wildcards: config["viruses"][wildcards.virus].get("host_filter", ""),
@@ -55,7 +55,7 @@ rule filter_and_extract_cds:
         "../envs/download.yaml"
     shell:
         """
-        echo "Extracting CDS and protein translation for {wildcards.virus} - {wildcards.protein}" > {log}
+        echo "Extracting CDS and protein translation for {wildcards.virus} - {wildcards.protein} (NCBI)" > {log}
         python workflow/scripts/extract_cds.py \
             --zip {input.zip} \
             --protein {wildcards.protein} \
@@ -66,4 +66,69 @@ rule filter_and_extract_cds:
             --out-nuc {output.fasta} \
             --out-prot {output.faa} >> {log} 2>&1
         echo "Extraction and filtering complete." >> {log}
+        """
+
+rule fetch_bvbrc:
+    output:
+        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_bvbrc.fasta",
+        faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_bvbrc.faa"
+    log:
+        WORKDIR + "/logs/fetch_bvbrc/{virus}_{protein}.log"
+    benchmark:
+        WORKDIR + "/benchmarks/fetch_bvbrc/{virus}_{protein}.tsv"
+    params:
+        taxon_id=lambda wildcards: config["viruses"][wildcards.virus]["taxon_id"],
+        geo_filter=lambda wildcards: config["viruses"][wildcards.virus].get("geo_filter", ""),
+        host_filter=lambda wildcards: config["viruses"][wildcards.virus].get("host_filter", ""),
+        max_seq=config["max_sequences_per_group"],
+        min_len=config.get("min_length_cds", 1500)
+    conda:
+        "../envs/download.yaml"
+    shell:
+        """
+        echo "Fetching from BV-BRC for {wildcards.virus} - {wildcards.protein}" > {log}
+        python workflow/scripts/fetch_bvbrc.py \
+            --taxon "{params.taxon_id}" \
+            --protein "{wildcards.protein}" \
+            --geo "{params.geo_filter}" \
+            --host "{params.host_filter}" \
+            --max {params.max_seq} \
+            --min-len {params.min_len} \
+            --out-nuc {output.fasta} \
+            --out-prot {output.faa} >> {log} 2>&1
+        echo "BV-BRC fetch complete." >> {log}
+        """
+
+rule merge_and_deduplicate:
+    input:
+        ncbi_fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_ncbi.fasta",
+        ncbi_faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_ncbi.faa",
+        bvbrc_fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_bvbrc.fasta",
+        bvbrc_faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_bvbrc.faa"
+    output:
+        fasta=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.fasta",
+        faa=WORKDIR + "/01_raw_fasta/{virus}/{protein}_filtered.faa"
+    log:
+        WORKDIR + "/logs/merge_and_dedup/{virus}_{protein}.log"
+    params:
+        max_seq=config["max_sequences_per_group"]
+    conda:
+        "../envs/download.yaml"
+    shell:
+        """
+        echo "Merging and deduplicating nucleotides..." > {log}
+        python workflow/scripts/merge_fasta.py \
+            --ncbi {input.ncbi_fasta} \
+            --bvbrc {input.bvbrc_fasta} \
+            --out {output.fasta} \
+            --max {params.max_seq} >> {log} 2>&1
+            
+        echo "Merging and deduplicating proteins..." >> {log}
+        python workflow/scripts/merge_fasta.py \
+            --ncbi {input.ncbi_faa} \
+            --bvbrc {input.bvbrc_faa} \
+            --out {output.faa} \
+            --max {params.max_seq} >> {log} 2>&1
+            
+        echo "Merge complete." >> {log}
         """
