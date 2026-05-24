@@ -431,7 +431,7 @@ def main():
 
     print(f"\n=== All-Site Selection Table: {args.virus_group} / {args.protein} ===")
     print(f"  Total sites     : {total}")
-    print(f"  Consensus pos   : {n_pos} sites (≥2 methods agree)")
+    print(f"  Consensus pos   : {n_pos} sites (>=2 methods agree)")
     print(f"  Contrast-FEL sig: {n_cfell_sig} sites (H2H vs Reservoir, FDR < {args.contrast_fdr})")
     print(f"  Recombination warning: {gard_warn}")
     print(f"  Output: {args.out}")
