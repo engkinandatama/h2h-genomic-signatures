@@ -10,33 +10,31 @@ import os
 
 BVBRC_API = "https://www.bv-brc.org/api"
 
-# Codon table for validation
-CODON_TABLE = {
-    'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
-    'ACA':'T', 'ACC':'T', 'ACG':'T', 'ACT':'T',
-    'AAC':'N', 'AAT':'N', 'AAA':'K', 'AAG':'K',
-    'AGC':'S', 'AGT':'S', 'AGA':'R', 'AGG':'R',
-    'CTA':'L', 'CTC':'L', 'CTG':'L', 'CTT':'L',
-    'CCA':'P', 'CCC':'P', 'CCG':'P', 'CCT':'P',
-    'CAC':'H', 'CAT':'H', 'CAA':'Q', 'CAG':'Q',
-    'CGA':'R', 'CGC':'R', 'CGG':'R', 'CGT':'R',
-    'GTA':'V', 'GTC':'V', 'GTG':'V', 'GTT':'V',
-    'GCA':'A', 'GCC':'A', 'GCG':'A', 'GCT':'A',
-    'GAC':'D', 'GAT':'D', 'GAA':'E', 'GAG':'E',
-    'GGA':'G', 'GGC':'G', 'GGG':'G', 'GGT':'G',
-    'TCA':'S', 'TCC':'S', 'TCG':'S', 'TCT':'S',
-    'TTC':'F', 'TTT':'F', 'TTA':'L', 'TTG':'L',
-    'TAC':'Y', 'TAT':'Y', 'TAA':'*', 'TAG':'*',
-    'TGC':'C', 'TGT':'C', 'TGA':'*', 'TGG':'W',
-}
-
 def translate_dna(dna_seq):
+    # Standard codon translation table as fallback (not needed if protein fasta works, but kept just in case)
+    codon_table = {
+        'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
+        'ACA':'T', 'ACC':'T', 'ACG':'T', 'ACT':'T',
+        'AAC':'N', 'AAT':'N', 'AAA':'K', 'AAG':'K',
+        'AGC':'S', 'AGT':'S', 'AGA':'R', 'AGG':'R',
+        'CTA':'L', 'CTC':'L', 'CTG':'L', 'CTT':'L',
+        'CCA':'P', 'CCC':'P', 'CCG':'P', 'CCT':'P',
+        'CAC':'H', 'CAT':'H', 'CAA':'Q', 'CAG':'Q',
+        'CGA':'R', 'CGC':'R', 'CGG':'R', 'CGT':'R',
+        'GTA':'V', 'GTC':'V', 'GTG':'V', 'GTT':'V',
+        'GCA':'A', 'GCC':'A', 'GCG':'A', 'GCT':'A',
+        'GAC':'D', 'GAT':'D', 'GAA':'E', 'GAG':'E',
+        'GGA':'G', 'GGC':'G', 'GGG':'G', 'GGT':'G',
+        'TCA':'S', 'TCC':'S', 'TCG':'S', 'TCT':'S',
+        'TTC':'F', 'TTT':'F', 'TTA':'L', 'TTG':'L',
+        'TAC':'Y', 'TAT':'Y', 'TAA':'*', 'TAG':'*',
+        'TGC':'C', 'TGT':'C', 'TGA':'*', 'TGG':'W',
+    }
     dna_seq = dna_seq.upper().replace('-', '').replace('\n', '').replace('\r', '').strip()
     protein = []
     for i in range(0, len(dna_seq) - 2, 3):
         codon = dna_seq[i:i+3]
-        amino_acid = CODON_TABLE.get(codon, 'X')
-        protein.append(amino_acid)
+        protein.append(codon_table.get(codon, 'X'))
     return "".join(protein)
 
 def protein_matches(target, product_val):
@@ -58,21 +56,25 @@ def protein_matches(target, product_val):
     else:
         return target in product_val
 
-def bvbrc_get(endpoint, params_str, retries=3):
+def bvbrc_get(endpoint, params_str, accept_header="application/json", retries=3):
     url = f"{BVBRC_API}/{endpoint}/?{params_str}"
     headers = {
-        "Accept": "application/json",
+        "Accept": accept_header,
         "Content-Type": "application/x-www-form-urlencoded",
         "User-Agent": "h2h-genomic-signatures/1.0",
     }
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                raw = resp.read().decode("utf-8")
-                return json.loads(raw)
+            with urllib.request.urlopen(req, timeout=90) as resp:
+                raw = resp.read()
+                if accept_header == "application/json":
+                    return json.loads(raw.decode("utf-8"))
+                else:
+                    return raw.decode("utf-8")
         except urllib.error.HTTPError as e:
-            return None
+            if attempt == retries - 1:
+                return None
         except Exception as e:
             if attempt == retries - 1:
                 return None
@@ -119,6 +121,49 @@ def fetch_genomes(taxon_id, geo_filter, host_filter):
         
     return valid_ids
 
+def parse_fasta(fasta_text):
+    records = {}
+    if not fasta_text:
+        return records
+    current_id = None
+    current_product = None
+    current_seq = []
+    
+    for line in fasta_text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(">"):
+            if current_id:
+                records[current_id] = ("".join(current_seq), current_product)
+            header = line
+            parts = header.split('|')
+            if len(parts) >= 3:
+                feature_id = parts[1].strip()
+                product_part = parts[2]
+                product = product_part.split('[')[0].strip()
+                last_part = parts[-1].strip().rstrip(']')
+                genome_id = last_part.strip()
+                
+                if feature_id == "undefined":
+                    clean_product = re.sub(r'[^a-zA-Z0-9_]', '_', product)
+                    feature_id = f"{genome_id}_{clean_product}"
+                
+                current_id = feature_id
+                current_product = product
+            else:
+                current_id = None
+                current_product = None
+            current_seq = []
+        else:
+            if current_id:
+                current_seq.append(line)
+                
+    if current_id:
+        records[current_id] = ("".join(current_seq), current_product)
+        
+    return records
+
 def fetch_features(genome_ids, protein_target, min_len):
     passed_nuc = []
     passed_prot = []
@@ -127,55 +172,48 @@ def fetch_features(genome_ids, protein_target, min_len):
     batch_size = 100
     for i in range(0, len(genome_ids), batch_size):
         batch = genome_ids[i:i+batch_size]
-        genomes_str = ",".join([f'"{g}"' for g in batch])
+        # In RQL, genome_id list should NOT contain quotes, e.g. in(genome_id,(186538.100,186538.1000))
+        genomes_str = ",".join(batch)
         
-        offset = 0
-        page_size = 1000
-        fields = "feature_id,genome_id,product,na_sequence,aa_sequence"
+        rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)"
         
-        while True:
-            rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)&select({fields})&limit({page_size},{offset})"
-            data = bvbrc_get("genome_feature", rql)
+        # Fetch DNA and Protein FASTA in parallel/sequence
+        dna_fasta = bvbrc_get("genome_feature", rql, accept_header="application/dna+fasta")
+        prot_fasta = bvbrc_get("genome_feature", rql, accept_header="application/protein+fasta")
+        
+        dna_records = parse_fasta(dna_fasta)
+        prot_records = parse_fasta(prot_fasta)
+        
+        # Match by feature ID
+        common_ids = set(dna_records.keys()) & set(prot_records.keys())
+        
+        for fid in common_ids:
+            na_seq, product = dna_records[fid]
+            aa_seq, _ = prot_records[fid]
             
-            if data is None:
-                break
+            if not na_seq:
+                continue
                 
-            records = data if isinstance(data, list) else data.get("response", {}).get("docs", [])
-            if not records:
-                break
+            if not protein_matches(protein_target, product):
+                continue
                 
-            for r in records:
-                product = r.get("product", "")
-                na_seq = r.get("na_sequence", "")
-                aa_seq = r.get("aa_sequence", "")
+            if min_len and len(na_seq) < min_len:
+                continue
                 
-                if not na_seq:
-                    continue
-                    
-                if not protein_matches(protein_target, product):
-                    continue
-                    
-                if min_len and len(na_seq) < min_len:
-                    continue
-                    
-                if len(na_seq) % 3 != 0:
-                    continue
-                    
-                # Calculate translation if missing
-                if not aa_seq:
-                    aa_seq = translate_dna(na_seq)
-                    
-                if '*' in aa_seq[:-1]:
-                    continue
-                    
-                feature_id = r.get("feature_id", r.get("genome_id"))
-                passed_nuc.append((feature_id, na_seq.upper()))
-                passed_prot.append((feature_id, aa_seq.upper()))
+            if len(na_seq) % 3 != 0:
+                continue
                 
-            if len(records) < page_size:
-                break
-            offset += page_size
-            time.sleep(0.5)
+            # If server returned empty protein seq, translate locally
+            if not aa_seq:
+                aa_seq = translate_dna(na_seq)
+                
+            if '*' in aa_seq[:-1]:
+                continue
+                
+            passed_nuc.append((fid, na_seq.upper()))
+            passed_prot.append((fid, aa_seq.upper()))
+            
+        time.sleep(0.5)
             
     return passed_nuc, passed_prot
 
