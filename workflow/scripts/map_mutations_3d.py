@@ -243,7 +243,7 @@ def main():
             viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
             
             // Styling positive selection: warna merah untuk residu dengan B-factor >= 100.00
-            viewer.setStyle({{ b: {{ len: 1, min: 100, max: 1000 }} }}, {{ 
+            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }}, {{ 
                 cartoon: {{ color: '#ef4444' }},
                 stick: {{ color: '#ef4444', radius: 0.25 }}
             }});
