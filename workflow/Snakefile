@@ -15,12 +15,17 @@ TARGETS = []
 # Target per virus group dan protein
 for vg in VIRUS_GROUPS:
     for p in config["virus_groups"][vg]["proteins"]:
-        # Hasil positive selection
+        # Hasil positive selection (site-level)
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_meme_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fel_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_fubar_results.txt")
         TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_selection_complete.tsv")
+        # Branch-specific selection analysis (host-range change signatures)
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_busted.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_absrel.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_relax.json")
+        TARGETS.append(f"{WORKDIR}/04_selection/{vg}/{p}_branch_selection.tsv")
         # Visualisasi 3D
         TARGETS.append(f"{WORKDIR}/05_structure/{vg}/{p}_3d_view.html")
         

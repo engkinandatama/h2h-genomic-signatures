@@ -157,3 +157,159 @@ rule aggregate_selection:
             --out-fubar {output.fubar_txt} \
             --out-complete {output.complete} >> {log} 2>&1
         """
+
+
+# =============================================================================
+# Branch-Specific Selection Analysis (Host-Range Change Signatures)
+# =============================================================================
+
+rule hyphy_busted:
+    """
+    BUSTED: Branch-Site Unrestricted Test for Episodic Diversification.
+    Gene-level gate test — has this gene experienced positive selection
+    anywhere on the Foreground (H2H) branches?
+    Faster to run than aBSREL; use as a pre-filter.
+    """
+    input:
+        codon_aln=WORKDIR + "/02_aligned/{virus_group}/{protein}_codon_aligned.fasta",
+        tree=WORKDIR + "/03_trees/{virus_group}/{protein}_labeled.treefile"
+    output:
+        json=WORKDIR + "/04_selection/{virus_group}/{protein}_busted.json"
+    log:
+        WORKDIR + "/logs/hyphy_busted/{virus_group}_{protein}.log"
+    benchmark:
+        WORKDIR + "/benchmarks/hyphy_busted/{virus_group}_{protein}.tsv"
+    threads:
+        config.get("resources", {}).get("threads", {}).get("hyphy", 8)
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+    conda:
+        "../envs/selection.yaml"
+    shell:
+        """
+        echo "Running HyPhy BUSTED for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+        if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
+            echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
+            echo '{{}}' > {output.json}
+            exit 0
+        fi
+
+        hyphy busted \
+            --alignment {input.codon_aln} \
+            --tree {input.tree} \
+            --output {output.json} \
+            --branches Foreground >> {log} 2>&1 \
+            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy BUSTED failed, created empty JSON" >> {log})
+        """
+
+
+rule hyphy_absrel:
+    """
+    aBSREL: Adaptive Branch-Site Random Effects Likelihood.
+    Branch-level resolution — identifies WHICH specific branches
+    have experienced episodic diversifying selection.
+    More granular than BUSTED, heavier computation.
+    """
+    input:
+        codon_aln=WORKDIR + "/02_aligned/{virus_group}/{protein}_codon_aligned.fasta",
+        tree=WORKDIR + "/03_trees/{virus_group}/{protein}_labeled.treefile"
+    output:
+        json=WORKDIR + "/04_selection/{virus_group}/{protein}_absrel.json"
+    log:
+        WORKDIR + "/logs/hyphy_absrel/{virus_group}_{protein}.log"
+    benchmark:
+        WORKDIR + "/benchmarks/hyphy_absrel/{virus_group}_{protein}.tsv"
+    threads:
+        config.get("resources", {}).get("threads", {}).get("hyphy", 8)
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+    conda:
+        "../envs/selection.yaml"
+    shell:
+        """
+        echo "Running HyPhy aBSREL for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+        if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
+            echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
+            echo '{{}}' > {output.json}
+            exit 0
+        fi
+
+        hyphy absrel \
+            --alignment {input.codon_aln} \
+            --tree {input.tree} \
+            --output {output.json} \
+            --branches Foreground >> {log} 2>&1 \
+            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy aBSREL failed, created empty JSON" >> {log})
+        """
+
+
+rule hyphy_relax:
+    """
+    RELAX: Tests whether selection pressure is relaxed (k < 1)
+    or intensified (k > 1) on Foreground (H2H) branches compared
+    to Reference (Reservoir/Spillover) branches.
+    Key question: Did host-range change accompany intensified
+    or relaxed purifying/positive selection?
+    """
+    input:
+        codon_aln=WORKDIR + "/02_aligned/{virus_group}/{protein}_codon_aligned.fasta",
+        tree=WORKDIR + "/03_trees/{virus_group}/{protein}_labeled.treefile"
+    output:
+        json=WORKDIR + "/04_selection/{virus_group}/{protein}_relax.json"
+    log:
+        WORKDIR + "/logs/hyphy_relax/{virus_group}_{protein}.log"
+    benchmark:
+        WORKDIR + "/benchmarks/hyphy_relax/{virus_group}_{protein}.tsv"
+    threads:
+        config.get("resources", {}).get("threads", {}).get("hyphy", 8)
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000)
+    conda:
+        "../envs/selection.yaml"
+    shell:
+        """
+        echo "Running HyPhy RELAX for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+        if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
+            echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
+            echo '{{}}' > {output.json}
+            exit 0
+        fi
+
+        hyphy relax \
+            --alignment {input.codon_aln} \
+            --tree {input.tree} \
+            --output {output.json} \
+            --test Foreground \
+            --reference Reference >> {log} 2>&1 \
+            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy RELAX failed, created empty JSON" >> {log})
+        """
+
+
+rule aggregate_branch_selection:
+    """
+    Parse BUSTED + aBSREL + RELAX results into a single per-protein TSV summary.
+    This feeds into the final convergence statistics rule.
+    """
+    input:
+        busted=WORKDIR + "/04_selection/{virus_group}/{protein}_busted.json",
+        absrel=WORKDIR + "/04_selection/{virus_group}/{protein}_absrel.json",
+        relax=WORKDIR + "/04_selection/{virus_group}/{protein}_relax.json"
+    output:
+        summary=WORKDIR + "/04_selection/{virus_group}/{protein}_branch_selection.tsv"
+    log:
+        WORKDIR + "/logs/aggregate_branch_selection/{virus_group}_{protein}.log"
+    benchmark:
+        WORKDIR + "/benchmarks/aggregate_branch_selection/{virus_group}_{protein}.tsv"
+    conda:
+        "../envs/selection.yaml"
+    shell:
+        """
+        echo "Aggregating branch-specific selection for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+        python workflow/scripts/parse_branch_selection.py \
+            --busted {input.busted} \
+            --absrel {input.absrel} \
+            --relax  {input.relax} \
+            --out    {output.summary} \
+            --virus-group {wildcards.virus_group} \
+            --protein {wildcards.protein} >> {log} 2>&1
+        """
