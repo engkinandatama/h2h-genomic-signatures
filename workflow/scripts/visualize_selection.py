@@ -73,7 +73,19 @@ def neg_log10(p, floor=1e-10):
 def make_manhattan(sites, virus_group, protein, out_png):
     """Generate and save the Manhattan plot."""
     if not sites:
-        print("Warning: no site data, skipping plot.", file=sys.stderr)
+        print("Warning: no site data, generating placeholder plot.", file=sys.stderr)
+        os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
+        if HAS_MATPLOTLIB:
+            fig, ax = plt.subplots(figsize=(8, 3))
+            fig.patch.set_facecolor("#0f172a")
+            ax.set_facecolor("#1e293b")
+            ax.text(0.5, 0.5, f"No selection data available for {virus_group} — {protein}\n(empty input alignment or insufficient sequences)", 
+                    color="#f8fafc", ha="center", va="center", fontsize=10, fontweight="bold")
+            ax.axis("off")
+            plt.savefig(out_png, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+            plt.close()
+        else:
+            open(out_png, "w").close()
         return
 
     positions  = [int(s["site"]) for s in sites]
