@@ -31,24 +31,39 @@ def load_json(filepath):
         print(f"Warning: Gagal membaca {filepath}: {e}")
         return None
 
+def _extract_rows_from_content(content):
+    """Handle HyPhy content, which is a dict {"0": [rows...]} or a plain list."""
+    if isinstance(content, dict):
+        # Standard HyPhy format: content = {"0": [row1, row2, ...]}
+        key = list(content.keys())[0]
+        return content[key]
+    elif isinstance(content, list):
+        return content
+    return []
+
+
+def _find_header_index(headers, keywords, default_idx):
+    """Search headers (may be list of [name, desc] or plain strings) for a keyword."""
+    for i, h in enumerate(headers):
+        h_str = (h[0] + " " + h[1]).lower() if isinstance(h, list) and len(h) >= 2 else str(h).lower()
+        if any(kw in h_str for kw in keywords):
+            return i
+    return default_idx
+
+
 def parse_meme(data):
     if not data or "MLE" not in data:
         return {}
     mle = data["MLE"]
     headers = mle.get("headers", [])
-    content = mle.get("content", [])
-    
-    p_idx = -1
-    for i, h in enumerate(headers):
-        h_str = h[0].lower() if isinstance(h, list) else h.lower()
-        if "p-value" in h_str or "p value" in h_str or "pval" in h_str:
-            p_idx = i
-            break
-    if p_idx == -1:
-        p_idx = min(5, len(headers) - 1)
-        
+    content = mle.get("content", {})
+
+    # MEME p-value column: look for "p-value" in header description, default index 6
+    p_idx = _find_header_index(headers, ["p-value", "p value", "pval"], 6)
+
+    rows = _extract_rows_from_content(content)
     results = {}
-    for idx, row in enumerate(content):
+    for idx, row in enumerate(rows):
         if len(row) > p_idx:
             try:
                 results[idx + 1] = float(row[p_idx])
@@ -61,19 +76,14 @@ def parse_fel(data):
         return {}
     mle = data["MLE"]
     headers = mle.get("headers", [])
-    content = mle.get("content", [])
-    
-    p_idx = -1
-    for i, h in enumerate(headers):
-        h_str = h[0].lower() if isinstance(h, list) else h.lower()
-        if "p-value" in h_str or "p value" in h_str or "pval" in h_str:
-            p_idx = i
-            break
-    if p_idx == -1:
-        p_idx = min(3, len(headers) - 1)
-        
+    content = mle.get("content", {})
+
+    # FEL p-value column: look for "p-value" in header description, default index 4
+    p_idx = _find_header_index(headers, ["p-value", "p value", "pval"], 4)
+
+    rows = _extract_rows_from_content(content)
     results = {}
-    for idx, row in enumerate(content):
+    for idx, row in enumerate(rows):
         if len(row) > p_idx:
             try:
                 results[idx + 1] = float(row[p_idx])
@@ -84,30 +94,31 @@ def parse_fel(data):
 def parse_fubar(data):
     if not data:
         return {}
-    
+
+    # FUBAR stores results in MLE section
     fubar_data = None
-    if "posterior" in data:
-        fubar_data = data["posterior"]
-    elif "MLE" in data:
+    if "MLE" in data:
         fubar_data = data["MLE"]
-        
+    elif "posterior" in data:
+        fubar_data = data["posterior"]
+
     if not fubar_data:
         return {}
-        
+
     headers = fubar_data.get("headers", [])
-    content = fubar_data.get("content", [])
-    
-    pp_idx = -1
-    for i, h in enumerate(headers):
-        h_str = h[0].lower() if isinstance(h, list) else h.lower()
-        if "prob[alpha < beta]" in h_str or "prob[alpha<beta]" in h_str or "alpha<beta" in h_str or "alpha < beta" in h_str or "prob[beta > alpha]" in h_str or "beta > alpha" in h_str:
-            pp_idx = i
-            break
-    if pp_idx == -1:
-        pp_idx = min(4, len(headers) - 1)
-        
+    content = fubar_data.get("content", {})
+
+    # FUBAR positive selection column: Prob[alpha<beta], default index 4
+    pp_idx = _find_header_index(
+        headers,
+        ["prob[alpha<beta]", "prob[alpha < beta]", "alpha<beta", "alpha < beta",
+         "prob[beta>alpha]", "prob[beta > alpha]", "positive selection"],
+        4
+    )
+
+    rows = _extract_rows_from_content(content)
     results = {}
-    for idx, row in enumerate(content):
+    for idx, row in enumerate(rows):
         if len(row) > pp_idx:
             try:
                 results[idx + 1] = float(row[pp_idx])
