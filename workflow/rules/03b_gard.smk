@@ -52,7 +52,7 @@ rule hyphy_gard:
             --alignment {input.codon_aln} \
             --output {output.json} \
             --output-lf /dev/null \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: GARD failed" >> {log})
 
         # Parse JSON to write human-readable summary

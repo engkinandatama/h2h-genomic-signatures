@@ -55,7 +55,7 @@ rule hyphy_meme:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --cpu {threads} \
+            CPU={threads} \
             --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy MEME failed, created empty JSON" >> {log})
         """
 
@@ -89,7 +89,7 @@ rule hyphy_fel:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --cpu {threads} \
+            CPU={threads} \
             --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FEL failed, created empty JSON" >> {log})
         """
 
@@ -123,7 +123,7 @@ rule hyphy_fubar:
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            --cpu {threads} >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FUBAR failed, created empty JSON" >> {log})
+            CPU={threads} >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FUBAR failed, created empty JSON" >> {log})
         """
 
 rule aggregate_selection:
@@ -206,7 +206,7 @@ rule hyphy_busted:
             --tree {input.tree} \
             --output {output.json} \
             --branches Foreground \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy BUSTED failed, created empty JSON" >> {log})
         """
 
@@ -248,7 +248,7 @@ rule hyphy_absrel:
             --tree {input.tree} \
             --output {output.json} \
             --branches Foreground \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy aBSREL failed, created empty JSON" >> {log})
         """
 
@@ -292,7 +292,7 @@ rule hyphy_relax:
             --output {output.json} \
             --test Foreground \
             --reference Reference \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: HyPhy RELAX failed, created empty JSON" >> {log})
         """
 
@@ -368,7 +368,7 @@ rule hyphy_slac:
             --tree {input.tree} \
             --branches All \
             --output {output.json} \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: SLAC failed" >> {log})
         """
 
@@ -416,7 +416,7 @@ rule hyphy_contrast_fel:
             --tree {input.tree} \
             --branch-set Foreground \
             --output {output.json} \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: Contrast-FEL failed" >> {log})
         """
 
@@ -465,7 +465,7 @@ rule hyphy_prime:
             --tree {input.tree} \
             --branches Foreground \
             --output {output.json} \
-            --cpu {threads} >> {log} 2>&1 \
+            CPU={threads} >> {log} 2>&1 \
             || (echo '{{}}' > {output.json} && echo "Warning: PRIME failed" >> {log})
         """
 
