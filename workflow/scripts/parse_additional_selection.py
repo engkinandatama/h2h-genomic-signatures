@@ -181,14 +181,19 @@ def parse_slac(data, pval_thresh):
 
 def parse_contrast_fel(data, pval_thresh, fdr_thresh):
     """
-    Contrast-FEL MLE headers (typical order):
-      0: alpha (dS)
-      1: beta_ref (dN in reference/background)
-      2: beta_test (dN in test/foreground = H2H)
-      3: LRT
-      4: p-value
-      5: q-value (Benjamini-Hochberg corrected)
-    Returns {site: {cfel_beta_h2h, cfel_beta_ref, cfel_p, cfel_q, cfel_sig}}
+    Contrast-FEL MLE headers (actual HyPhy output):
+      0: alpha               (dS / synonymous rate)
+      1: beta (Foreground)   (dN in H2H / test branches)   <-- FOREGROUND
+      2: beta (background)   (dN in reservoir / background) <-- BACKGROUND
+      3: subs (Foreground)   (substitution count)
+      4: P-value (overall)   <-- main p-value
+      5: Q-value (overall)   <-- FDR-corrected
+      6: Permutation p-value
+      7: Total branch length
+
+    NOTE: Foreground=index 1, Background=index 2.
+    The original parser had these SWAPPED (ref_idx=1,test_idx=2 with wrong keywords).
+    Also find_col was matching wrong columns for p-value.
     """
     if not data or "MLE" not in data:
         return {}
@@ -196,42 +201,80 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
     headers = mle.get("headers", [])
     rows = extract_rows(mle.get("content", {}))
 
-    # Try to find foreground (test) and background (reference) columns
-    # In Contrast-FEL: beta columns labeled as "Test" or "Reference"
-    ref_idx  = find_col(headers, ["beta reference", "beta-", "background", "reference"], 1)
-    test_idx = find_col(headers, ["beta test", "beta+", "foreground", "test"], 2)
-    p_idx    = find_col(headers, ["p-value", "pval"], 4)
-    q_idx    = find_col(headers, ["q-value", "fdr", "benjamini"], 5)
+    # Fixed indices verified against actual Contrast-FEL JSON headers
+    fg_idx = 1   # beta (Foreground) = H2H branches
+    bg_idx = 2   # beta (background) = reservoir branches
+    p_idx  = 4   # P-value (overall)
+    q_idx  = 5   # Q-value (overall)
+
+    # Dynamic override if header labels differ
+    for i, h in enumerate(headers):
+        txt = " ".join(h).lower() if isinstance(h, list) else str(h).lower()
+        if "foreground" in txt and "beta" in txt:
+            fg_idx = i
+        elif "background" in txt and "beta" in txt:
+            bg_idx = i
+        elif "p-value (overall)" in txt or ("p-value" in txt and "overall" in txt):
+            p_idx = i
+        elif "q-value (overall)" in txt or ("q-value" in txt and "overall" in txt):
+            q_idx = i
 
     out = {}
     for i, row in enumerate(rows):
         try:
-            p = float(row[p_idx])  if len(row) > p_idx  else 1.0
-            q = float(row[q_idx])  if len(row) > q_idx  else 1.0
+            p = float(row[p_idx]) if len(row) > p_idx else 1.0
+            q = float(row[q_idx]) if len(row) > q_idx else 1.0
+            beta_fg = round(float(row[fg_idx]), 6) if len(row) > fg_idx else "NA"
+            beta_bg = round(float(row[bg_idx]), 6) if len(row) > bg_idx else "NA"
             out[i + 1] = {
-                "cfel_beta_h2h": round(float(row[test_idx]), 6) if len(row) > test_idx else "NA",
-                "cfel_beta_ref": round(float(row[ref_idx]),  6) if len(row) > ref_idx  else "NA",
-                "cfel_p":        round(p, 6),
-                "cfel_q":        round(q, 6),
-                "cfel_sig":      q < fdr_thresh,
+                "cfel_beta_h2h":      beta_fg,
+                "cfel_beta_ref":      beta_bg,
+                "cfel_p":             round(p, 6),
+                "cfel_q":             round(q, 6),
+                "cfel_sig":           q < fdr_thresh,
+                "cfel_h2h_stronger":  (
+                    isinstance(beta_fg, float) and isinstance(beta_bg, float)
+                    and beta_fg > beta_bg and q < fdr_thresh
+                ),
             }
         except (TypeError, ValueError):
             out[i + 1] = {"cfel_beta_h2h": "NA", "cfel_beta_ref": "NA",
-                          "cfel_p": 1.0, "cfel_q": 1.0, "cfel_sig": False}
+                          "cfel_p": 1.0, "cfel_q": 1.0,
+                          "cfel_sig": False, "cfel_h2h_stronger": False}
     return out
 
 
 def parse_prime(data, pval_thresh):
     """
-    PRIME MLE headers (typical):
-      0: alpha (dS)
-      1: LRT (overall)
-      2: p-value (overall)
-      Then pairs of [LRT, p-value] for each property:
-        Volume, Polarity, Charge, Hydrophobicity, Composition
-    Returns {site: {prime_overall_p, prime_volume_p, prime_polarity_p,
-                    prime_charge_p, prime_hydrophobicity_p, prime_composition_p,
-                    prime_sig_properties}}
+    PRIME MLE headers (actual HyPhy output — 3 properties shown, more possible):
+      0:  alpha (dS)
+      1:  beta  (overall non-syn rate)
+      2:  FEL alpha
+      3:  FEL beta
+      4:  Total branch length
+      5:  # subs
+      6:  # aa
+      7:  PRIME LogL
+      8:  FEL LogL
+      9:  p-value  (omnibus — ANY property important)   <-- OVERALL
+      10: q-value
+      11: R (redundancy)
+      12: lambda1  (effect size, property 1)
+      13: p1       (p-value, property 1)                <-- PROPERTY p-values
+      14: LogL1
+      15: lambda2  (effect size, property 2)
+      16: p2
+      17: LogL2
+      18: lambda3
+      19: p3
+      20: LogL3
+      ... (up to 5 properties: pattern is idx 12+3k for lambda, 13+3k for p)
+
+    Property names come from header labels (e.g. Hydrophobicity_KyteDoolittle,
+    Isoelectric_Point_pI, Volume_Angstrom3, ...). We read them dynamically.
+
+    CRITICAL: overall p-value is index 9 (not 2 as previously assumed).
+    Property p-values follow pattern: p_k = index 13 + 3*(k-1) for k=1,2,3,...
     """
     if not data or "MLE" not in data:
         return {}
@@ -239,44 +282,75 @@ def parse_prime(data, pval_thresh):
     headers = mle.get("headers", [])
     rows = extract_rows(mle.get("content", {}))
 
-    # Map property names to column indices by scanning headers
-    prop_cols = {}
-    for prop in ["volume", "polarity", "charge", "hydrophobicity", "composition"]:
-        for i, h in enumerate(headers):
-            text = " ".join(h).lower() if isinstance(h, list) else str(h).lower()
-            if prop in text and "p-value" in text:
-                prop_cols[prop] = i
+    # ── Find overall p-value index ────────────────────────────────────────────
+    overall_p_idx = 9   # default from verified JSON
+    for i, h in enumerate(headers):
+        txt = " ".join(h).lower() if isinstance(h, list) else str(h).lower()
+        if ("p-value" in txt or "p value" in txt) and ("omni" in txt or "overall" in txt or "any" in txt):
+            overall_p_idx = i
+            break
+
+    # ── Discover property p-value columns dynamically ─────────────────────────
+    # Pattern: headers contain p-values for each property as 'p1', 'p2', ... or
+    # labeled with the property name. We scan for headers where label matches 'pN'
+    # or where description contains a recognisable property name.
+    PROP_KEYWORDS = {
+        "hydrophobicity": "hydrophobicity",
+        "kytedoolittle":  "hydrophobicity",
+        "isoelectric":    "isoelectric_point",
+        "volume":         "volume",
+        "polarity":       "polarity",
+        "charge":         "charge",
+        "composition":    "composition",
+        "size":           "size",
+        "flexibility":    "flexibility",
+    }
+    prop_cols = {}   # {friendly_name: col_idx}
+    for i, h in enumerate(headers):
+        label = h[0].lower() if isinstance(h, list) else str(h).lower()
+        desc  = h[1].lower() if isinstance(h, list) and len(h) > 1 else ""
+        # Must be a p-value column (label starts with 'p' followed by digit, or desc says p-value)
+        is_pval_col = (
+            (len(label) <= 3 and label.startswith("p") and label[1:].isdigit())
+            or ("p-value" in desc and "non-zero" in desc)
+        )
+        if not is_pval_col:
+            continue
+        # Identify which property
+        for kw, fname in PROP_KEYWORDS.items():
+            if kw in desc:
+                if fname not in prop_cols:   # take first match per property
+                    prop_cols[fname] = i
                 break
 
-    overall_p_idx = find_col(headers, ["p-value", "overall p", "total"], 2)
+    # Standardise output column names to 5 canonical names
+    CANONICAL = [
+        "volume", "polarity", "charge", "hydrophobicity",
+        "isoelectric_point", "composition", "size", "flexibility"
+    ]
 
     out = {}
     for i, row in enumerate(rows):
         try:
-            entry = {
-                "prime_overall_p": round(float(row[overall_p_idx]), 6)
-                                   if len(row) > overall_p_idx else 1.0,
-            }
+            overall_p = float(row[overall_p_idx]) if len(row) > overall_p_idx else 1.0
+            entry = {"prime_overall_p": round(overall_p, 6)}
             sig_props = []
             for prop, col in prop_cols.items():
                 p = float(row[col]) if len(row) > col else 1.0
                 entry[f"prime_{prop}_p"] = round(p, 6)
                 if p < pval_thresh:
                     sig_props.append(prop)
-            entry["prime_sig_properties"] = "|".join(sig_props) if sig_props else "None"
-            # Fill missing properties
-            for prop in ["volume", "polarity", "charge", "hydrophobicity", "composition"]:
+            # Fill canonical columns that weren't found
+            for prop in CANONICAL:
                 if f"prime_{prop}_p" not in entry:
                     entry[f"prime_{prop}_p"] = "NA"
+            entry["prime_sig_properties"] = "|".join(sig_props) if sig_props else "None"
             out[i + 1] = entry
         except (TypeError, ValueError):
-            out[i + 1] = {
-                "prime_overall_p": 1.0,
-                "prime_volume_p": "NA", "prime_polarity_p": "NA",
-                "prime_charge_p": "NA", "prime_hydrophobicity_p": "NA",
-                "prime_composition_p": "NA",
-                "prime_sig_properties": "None",
-            }
+            entry = {"prime_overall_p": 1.0, "prime_sig_properties": "None"}
+            for prop in CANONICAL:
+                entry[f"prime_{prop}_p"] = "NA"
+            out[i + 1] = entry
     return out
 
 
