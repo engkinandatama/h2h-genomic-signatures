@@ -143,7 +143,8 @@ def main():
 <head>
     <meta charset="utf-8">
     <title>3D Structure Mapping - {args.uniprot}</title>
-    <script src="https://3Dmol.org/build/3dmol-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/3dmol/2.0.4/3Dmol-min.js"></script>
     <style>
         body {{
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -255,7 +256,19 @@ def main():
     <script>
         document.addEventListener("DOMContentLoaded", function() {{
             let element = document.getElementById("viewer");
-            let viewer = $3Dmol.createViewer(element, {{}});
+            
+            // Cek apakah pustaka 3Dmol berhasil dimuat dari CDN
+            if (typeof $3Dmol === "undefined" && typeof 3Dmol === "undefined") {
+                element.innerHTML = '<div style="color: #f87171; padding: 40px; text-align: center; font-weight: bold; font-family: system-ui, sans-serif; line-height: 1.6; margin-top: 150px;">' +
+                    '<span style="font-size: 24px;">⚠️ Gagal Memuat Visualisasi 3D</span><br><br>' +
+                    'Pustaka visualisasi 3D (3Dmol.js) tidak dapat diunduh dari CDN.<br>' +
+                    'Harap hubungkan komputer Anda ke internet, atau periksa apakah ekstensi penolak iklan (Ad-blocker) / firewall memblokir cdnjs.cloudflare.com.' +
+                    '</div>';
+                return;
+            }
+            
+            let mol3D = typeof $3Dmol !== "undefined" ? $3Dmol : 3Dmol;
+            let viewer = mol3D.createViewer(element, {{}});
             
             let pdbData = '{pdb_data_js}';
             
