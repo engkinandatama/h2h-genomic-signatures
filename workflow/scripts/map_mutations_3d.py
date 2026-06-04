@@ -19,19 +19,33 @@ def read_selection_sites(results_path):
         return sites
         
     with open(results_path, 'r') as f:
-        # Lewati header
-        header = f.readline()
+        header_line = f.readline().strip()
+        headers = header_line.split('\t')
+        
+        try:
+            site_idx = headers.index("site")
+            cfel_sig_idx = headers.index("cfel_sig")
+        except ValueError:
+            print("Warning: Format file tidak dikenali (tidak ada kolom 'site' atau 'cfel_sig'). Menggunakan fallback pembacaan kolom 1.")
+            site_idx = 0
+            cfel_sig_idx = -1
+            
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split('\t')
-            if len(parts) >= 1:
-                try:
-                    site = int(parts[0])
+            try:
+                site = int(parts[site_idx])
+                # Jika format lama (cfel_sig_idx == -1), anggap semua baris adalah seleksi positif.
+                # Jika format baru, cek apakah cfel_sig adalah 'Yes'.
+                if cfel_sig_idx != -1:
+                    if len(parts) > cfel_sig_idx and parts[cfel_sig_idx] == 'Yes':
+                        sites.append(site)
+                else:
                     sites.append(site)
-                except ValueError:
-                    continue
+            except ValueError:
+                continue
     return sites
 
 def download_alphafold_pdb(uniprot_id, temp_path):

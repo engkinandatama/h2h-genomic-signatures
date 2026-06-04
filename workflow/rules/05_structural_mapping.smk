@@ -1,7 +1,7 @@
 # Rule 5: Structural Mapping 3D (AlphaFold + Py3Dmol) - modified for virus_groups
 rule map_structure:
     input:
-        selection_results=WORKDIR + "/04_selection/{virus_group}/{protein}_selection_results.txt"
+        selection_results=WORKDIR + "/04_selection/{virus_group}/{protein}_all_sites.tsv"
     output:
         mapped_pdb=WORKDIR + "/05_structure/{virus_group}/{protein}_mapped.pdb",
         html_view=WORKDIR + "/05_structure/{virus_group}/{protein}_3d_view.html"
