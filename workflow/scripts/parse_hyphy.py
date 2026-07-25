@@ -72,24 +72,43 @@ def parse_meme(data):
     return results
 
 def parse_fel(data):
+    """
+    Return (p_values, positive_sites).
+
+    FEL's p-value tests the two-sided hypothesis beta != alpha, so a low p-value
+    alone does not mean positive selection: sites under strong purifying selection
+    are equally significant. positive_sites holds only those sites where beta >
+    alpha, and callers must require membership in it before counting a site as
+    evidence of positive selection.
+    """
     if not data or "MLE" not in data:
-        return {}
+        return {}, set()
     mle = data["MLE"]
     headers = mle.get("headers", [])
     content = mle.get("content", {})
 
     # FEL p-value column: look for "p-value" in header description, default index 4
     p_idx = _find_header_index(headers, ["p-value", "p value", "pval"], 4)
+    a_idx = _find_header_index(headers, ["alpha"], 0)
+    b_idx = _find_header_index(headers, ["beta"], 1)
 
     rows = _extract_rows_from_content(content)
     results = {}
+    positive_sites = set()
     for idx, row in enumerate(rows):
+        site = idx + 1
         if len(row) > p_idx:
             try:
-                results[idx + 1] = float(row[p_idx])
+                results[site] = float(row[p_idx])
             except Exception:
-                results[idx + 1] = 1.0
-    return results
+                results[site] = 1.0
+        if len(row) > max(a_idx, b_idx):
+            try:
+                if float(row[b_idx]) > float(row[a_idx]):
+                    positive_sites.add(site)
+            except Exception:
+                pass
+    return results, positive_sites
 
 def parse_fubar(data):
     if not data:
@@ -134,7 +153,7 @@ def main():
     fubar_data = load_json(args.fubar)
     
     meme_res = parse_meme(meme_data)
-    fel_res = parse_fel(fel_data)
+    fel_res, fel_pos = parse_fel(fel_data)
     fubar_res = parse_fubar(fubar_data)
     
     total_sites = 0
@@ -186,7 +205,7 @@ def main():
         f.write("Site\tP-value\n")
         for site in range(1, total_sites + 1):
             pval = fel_res.get(site, 1.0)
-            if pval < args.pvalue:
+            if pval < args.pvalue and site in fel_pos:
                 f.write(f"{site}\t{pval:.6f}\n")
                 fel_count += 1
                 
@@ -209,11 +228,11 @@ def main():
             fubar_pp = fubar_res.get(site, 0.0)
             
             sig_meme = 1 if meme_p < args.pvalue else 0
-            sig_fel = 1 if fel_p < args.pvalue else 0
+            sig_fel = 1 if (fel_p < args.pvalue and site in fel_pos) else 0
             sig_fubar = 1 if fubar_pp >= args.fubar_pp else 0
-            
+
             n_methods = sig_meme + sig_fel + sig_fubar
-            
+
             if n_methods >= args.min_methods:
                 # Gunakan p-value rata-rata dari MEME dan FEL sebagai representasi P-value
                 avg_p = (meme_p + fel_p) / 2.0
@@ -222,20 +241,22 @@ def main():
                 
     # Tulis hasil lengkap untuk semua site (Analisis lanjutan oleh user)
     with open(args.out_complete, 'w') as f:
-        f.write("Site\tMEME_p\tFEL_p\tFUBAR_pp\tn_methods\tConsensus\n")
+        f.write("Site\tMEME_p\tFEL_p\tFEL_positive\tFUBAR_pp\tn_methods\tConsensus\n")
         for site in range(1, total_sites + 1):
             meme_p = meme_res.get(site, 1.0)
             fel_p = fel_res.get(site, 1.0)
+            fel_is_pos = site in fel_pos
             fubar_pp = fubar_res.get(site, 0.0)
-            
+
             sig_meme = 1 if meme_p < args.pvalue else 0
-            sig_fel = 1 if fel_p < args.pvalue else 0
+            sig_fel = 1 if (fel_p < args.pvalue and fel_is_pos) else 0
             sig_fubar = 1 if fubar_pp >= args.fubar_pp else 0
-            
+
             n_methods = sig_meme + sig_fel + sig_fubar
             is_consensus = 1 if n_methods >= args.min_methods else 0
-            
-            f.write(f"{site}\t{meme_p:.6f}\t{fel_p:.6f}\t{fubar_pp:.6f}\t{n_methods}\t{is_consensus}\n")
+
+            f.write(f"{site}\t{meme_p:.6f}\t{fel_p:.6f}\t{int(fel_is_pos)}"
+                    f"\t{fubar_pp:.6f}\t{n_methods}\t{is_consensus}\n")
             
     print(f"Parser selesai. Total situs: {total_sites}")
     print(f"MEME signifikan: {meme_count}, FEL signifikan: {fel_count}, FUBAR signifikan: {fubar_count}")

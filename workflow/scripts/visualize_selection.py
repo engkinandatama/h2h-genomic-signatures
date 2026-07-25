@@ -196,16 +196,16 @@ def make_manhattan(sites, virus_group, protein, out_png):
     # Panel 3: SLAC dN−dS
     # -----------------------------------------------------------------------
     ax3 = axes[2]
-    slac_dndS = []
+    slac_dN_minus_dS = []
     for s in sites:
-        v = s.get("slac_dndS", "NA")
+        v = s.get("slac_dN_minus_dS", "NA")
         try:
-            slac_dndS.append(float(v))
+            slac_dN_minus_dS.append(float(v))
         except (ValueError, TypeError):
-            slac_dndS.append(0.0)
+            slac_dN_minus_dS.append(0.0)
 
-    colors = ["#ef4444" if v > 0 else "#3b82f6" for v in slac_dndS]
-    ax3.bar(positions, slac_dndS, width=bar_width, color=colors, alpha=0.7)
+    colors = ["#ef4444" if v > 0 else "#3b82f6" for v in slac_dN_minus_dS]
+    ax3.bar(positions, slac_dN_minus_dS, width=bar_width, color=colors, alpha=0.7)
     ax3.axhline(y=0, color="#475569", linewidth=0.8)
     ax3.set_ylabel("SLAC dN−dS", color="#94a3b8", fontsize=9)
     ax3.set_xlabel("Codon Position", color="#94a3b8", fontsize=10)

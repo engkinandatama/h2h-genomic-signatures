@@ -7,9 +7,10 @@ Handles: MEME, FEL, FUBAR, SLAC, Contrast-FEL, PRIME
 Plus: reads GARD summary to flag if recombination was detected.
 
 Output columns (one row per codon site):
-  site, meme_p, fel_p, fubar_pp, slac_ds, slac_dn, slac_dndS, slac_p,
-  cfell_beta_h2h, cfel_beta_ref, cfel_p, cfel_qval, cfel_sig,
-  prime_volume_p, prime_polarity_p, prime_charge_p, prime_hydrophobicity_p, prime_composition_p,
+  site, meme_p, fel_p, fubar_pp, slac_ds, slac_dn, slac_dN_minus_dS, slac_p,
+  cfell_beta_h2h, cfel_beta_ref, cfel_subs_fg, cfel_perm_p, cfel_p, cfel_qval, cfel_sig,
+  prime_hydrophobicity_p, prime_isoelectric_point_p, prime_volume_p,
+  prime_polarity_p, prime_charge_p, prime_composition_p,
   prime_sig_properties,
   n_methods_pos, n_methods_neg, consensus_pos, consensus_neg,
   recombination_warning, virus_group, protein
@@ -75,20 +76,36 @@ def parse_meme(data, pval_thresh):
 
 
 def parse_fel(data, pval_thresh):
-    """Returns {site: fel_p} — p-value at index 4."""
+    """
+    Returns (   {site: fel_p},   {sites where beta > alpha}   ).
+
+    FEL's p-value is two-sided (beta != alpha), so significance alone does not
+    indicate positive selection — purifying sites are equally significant. The
+    second return value carries the direction, and callers must require it before
+    counting a site toward positive-selection method agreement.
+    """
     if not data or "MLE" not in data:
-        return {}
+        return {}, set()
     mle = data["MLE"]
     headers = mle.get("headers", [])
     rows = extract_rows(mle.get("content", {}))
     idx = find_col(headers, ["p-value", "pval"], 4)
+    a_idx = find_col(headers, ["alpha"], 0)
+    b_idx = find_col(headers, ["beta"], 1)
     out = {}
+    positive = set()
     for i, row in enumerate(rows):
+        site = i + 1
         try:
-            out[i + 1] = float(row[idx]) if len(row) > idx else 1.0
+            out[site] = float(row[idx]) if len(row) > idx else 1.0
         except (TypeError, ValueError):
-            out[i + 1] = 1.0
-    return out
+            out[site] = 1.0
+        try:
+            if len(row) > max(a_idx, b_idx) and float(row[b_idx]) > float(row[a_idx]):
+                positive.add(site)
+        except (TypeError, ValueError):
+            pass
+    return out, positive
 
 
 def parse_fubar(data, pp_thresh):
@@ -124,7 +141,7 @@ def parse_slac(data, pval_thresh):
       8: P[dN/dS > 1]  <- positive selection p-value
       9: P[dN/dS < 1]  <- negative selection p-value
      10: Total branch length
-    Returns {site: {slac_ds, slac_dn, slac_dndS, slac_p, slac_np}}
+    Returns {site: {slac_ds, slac_dn, slac_dN_minus_dS, slac_p, slac_np}}
 
     CRITICAL: SLAC JSON nests per-site data as:
       MLE.content['0']['by-site']['AVERAGED']  -> list of per-site rows
@@ -168,15 +185,23 @@ def parse_slac(data, pval_thresh):
             out[i + 1] = {
                 "slac_ds":   _safe(row[ds_idx])  if len(row) > ds_idx  else "NA",
                 "slac_dn":   _safe(row[dn_idx])  if len(row) > dn_idx  else "NA",
-                "slac_dndS": _safe(row[dif_idx]) if len(row) > dif_idx else "NA",
+                "slac_dN_minus_dS": _safe(row[dif_idx]) if len(row) > dif_idx else "NA",
                 "slac_p":    _safe(row[pp_idx], default=1.0) if len(row) > pp_idx else 1.0,
                 "slac_np":   _safe(row[np_idx], default=1.0) if len(row) > np_idx else 1.0,
             }
         except (IndexError, TypeError, ValueError):
-            out[i + 1] = {"slac_ds": "NA", "slac_dn": "NA", "slac_dndS": "NA",
+            out[i + 1] = {"slac_ds": "NA", "slac_dn": "NA", "slac_dN_minus_dS": "NA",
                           "slac_p": 1.0, "slac_np": 1.0}
     return out
 
+
+
+def _num(row, idx, default="NA"):
+    """Read a numeric cell, returning `default` when absent or unparseable."""
+    try:
+        return float(row[idx]) if len(row) > idx else default
+    except (TypeError, ValueError):
+        return default
 
 
 def parse_contrast_fel(data, pval_thresh, fdr_thresh):
@@ -206,6 +231,8 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
     bg_idx = 2   # beta (background) = reservoir branches
     p_idx  = 4   # P-value (overall)
     q_idx  = 5   # Q-value (overall)
+    subs_idx = 3  # subs (Foreground): substitutions supporting the contrast
+    perm_idx = 6  # Permutation p-value; HyPhy writes -1 when not evaluated
 
     # Dynamic override if header labels differ
     for i, h in enumerate(headers):
@@ -218,6 +245,10 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
             p_idx = i
         elif "q-value (overall)" in txt or ("q-value" in txt and "overall" in txt):
             q_idx = i
+        elif "subs" in txt and "foreground" in txt:
+            subs_idx = i
+        elif "permutation" in txt:
+            perm_idx = i
 
     out = {}
     for i, row in enumerate(rows):
@@ -226,9 +257,17 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
             q = float(row[q_idx]) if len(row) > q_idx else 1.0
             beta_fg = round(float(row[fg_idx]), 6) if len(row) > fg_idx else "NA"
             beta_bg = round(float(row[bg_idx]), 6) if len(row) > bg_idx else "NA"
+            # Substitution support and the permutation p-value were previously
+            # discarded. Without them a "differential" site can rest on a single
+            # substitution against a background rate estimated at zero, and the
+            # -1 sentinel that marks an unevaluated permutation is invisible.
+            subs = _num(row, subs_idx, default="NA")
+            perm = _num(row, perm_idx, default="NA")
             out[i + 1] = {
                 "cfel_beta_h2h":      beta_fg,
                 "cfel_beta_ref":      beta_bg,
+                "cfel_subs_fg":       subs,
+                "cfel_perm_p":        perm,
                 "cfel_p":             round(p, 6),
                 "cfel_q":             round(q, 6),
                 "cfel_sig":           q < fdr_thresh,
@@ -239,6 +278,7 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
             }
         except (TypeError, ValueError):
             out[i + 1] = {"cfel_beta_h2h": "NA", "cfel_beta_ref": "NA",
+                          "cfel_subs_fg": "NA", "cfel_perm_p": "NA",
                           "cfel_p": 1.0, "cfel_q": 1.0,
                           "cfel_sig": False, "cfel_h2h_stronger": False}
     return out
@@ -390,6 +430,9 @@ def parse_args():
     p.add_argument("--pvalue",       type=float, default=0.05)
     p.add_argument("--fubar-pp",     type=float, default=0.90, dest="fubar_pp")
     p.add_argument("--contrast-fdr", type=float, default=0.20, dest="contrast_fdr")
+    p.add_argument("--min-methods", type=int, default=2, dest="min_methods",
+                   help="Number of site-level methods that must agree before a "
+                        "site is called consensus. The manuscript states 2.")
     p.add_argument("--virus-group",  required=True, dest="virus_group")
     p.add_argument("--protein",      required=True)
     p.add_argument("--out",          required=True)
@@ -400,7 +443,7 @@ def main():
     args = parse_args()
 
     meme_res   = parse_meme(load_json(args.meme),   args.pvalue)
-    fel_res    = parse_fel(load_json(args.fel),     args.pvalue)
+    fel_res, fel_pos = parse_fel(load_json(args.fel), args.pvalue)
     fubar_res  = parse_fubar(load_json(args.fubar), args.fubar_pp)
     slac_res   = parse_slac(load_json(args.slac),   args.pvalue)
     cfel_res   = parse_contrast_fel(load_json(args.contrast_fel), args.pvalue, args.contrast_fdr)
@@ -417,14 +460,16 @@ def main():
     header = [
         "site",
         "meme_p", "fel_p", "fubar_pp",
-        "slac_ds", "slac_dn", "slac_dndS", "slac_p", "slac_np",
-        "cfel_beta_h2h", "cfel_beta_ref", "cfel_p", "cfel_q", "cfel_sig",
+        "slac_ds", "slac_dn", "slac_dN_minus_dS", "slac_p", "slac_np",
+        "cfel_beta_h2h", "cfel_beta_ref", "cfel_subs_fg", "cfel_perm_p",
+        "cfel_p", "cfel_q", "cfel_sig",
         "prime_overall_p",
-        "prime_volume_p", "prime_polarity_p", "prime_charge_p",
-        "prime_hydrophobicity_p", "prime_composition_p",
+        "prime_hydrophobicity_p", "prime_isoelectric_point_p", "prime_volume_p",
+        "prime_polarity_p", "prime_charge_p", "prime_composition_p",
         "prime_sig_properties",
         "n_methods_pos",  # how many methods detect positive selection
         "n_methods_neg",  # how many methods detect negative selection
+        "episodic_only",  # bool: MEME-significant with no pervasive support
         "consensus_pos",  # bool: >= 2 methods agree on positive selection
         "consensus_neg",  # bool: >= 2 methods agree on negative selection
         "cfel_h2h_stronger",  # bool: H2H stronger than Reservoir at this site
@@ -444,30 +489,44 @@ def main():
             fp  = fel_res.get(site, 1.0)
             fup = fubar_res.get(site, 0.0)
             sl  = slac_res.get(site, {"slac_ds": "NA", "slac_dn": "NA",
-                                       "slac_dndS": "NA", "slac_p": 1.0, "slac_np": 1.0})
+                                       "slac_dN_minus_dS": "NA", "slac_p": 1.0, "slac_np": 1.0})
             cf  = cfel_res.get(site, {"cfel_beta_h2h": "NA", "cfel_beta_ref": "NA",
+                                       "cfel_subs_fg": "NA", "cfel_perm_p": "NA",
                                        "cfel_p": 1.0, "cfel_q": 1.0, "cfel_sig": False})
             pr  = prime_res.get(site, {
                 "prime_overall_p": 1.0,
+                "prime_hydrophobicity_p": "NA", "prime_isoelectric_point_p": "NA",
                 "prime_volume_p": "NA", "prime_polarity_p": "NA",
-                "prime_charge_p": "NA", "prime_hydrophobicity_p": "NA",
-                "prime_composition_p": "NA",
+                "prime_charge_p": "NA", "prime_composition_p": "NA",
                 "prime_sig_properties": "None",
             })
 
-            # Count methods detecting positive selection
+            # Count methods detecting positive selection. FEL requires beta > alpha:
+            # its p-value is two-sided, so without the direction check purifying
+            # sites are counted as positively selected.
+            fel_is_pos = site in fel_pos
             pos_methods = sum([
                 1 if mp  < args.pvalue else 0,    # MEME
-                1 if fp  < args.pvalue else 0,    # FEL
+                1 if (fp < args.pvalue and fel_is_pos) else 0,    # FEL
                 1 if fup >= args.fubar_pp else 0, # FUBAR
                 1 if (isinstance(sl["slac_p"], float) and sl["slac_p"] < args.pvalue) else 0,  # SLAC
             ])
+            # Episodic selection is a separate finding, not a weaker version of
+            # pervasive selection. MEME tests whether beta > alpha on a SUBSET of
+            # branches; FEL and FUBAR both test whether it holds across the whole
+            # tree. A genuinely episodic site is therefore MEME-significant and
+            # FEL/FUBAR-negative by design, and requiring method agreement removes
+            # exactly that category. Flagging it separately keeps consensus_pos
+            # meaning "two independent methods agree" without discarding the sites
+            # that motivated lowering the threshold in the first place.
+            pervasive_hit = ((fp < args.pvalue and fel_is_pos)
+                             or fup >= args.fubar_pp)
+            episodic_only = (mp < args.pvalue) and not pervasive_hit
+
             # Count methods detecting negative selection (purifying)
             neg_methods = sum([
                 1 if (isinstance(sl["slac_np"], float) and sl["slac_np"] < args.pvalue) else 0,
-                1 if (isinstance(fp, float) and fp < args.pvalue and
-                      "NA" not in str(sl["slac_dndS"]) and
-                      isinstance(sl["slac_dndS"], float) and sl["slac_dndS"] < 0) else 0,
+                1 if (isinstance(fp, float) and fp < args.pvalue and not fel_is_pos) else 0,
             ])
 
             # H2H stronger than reservoir at this site?
@@ -478,7 +537,7 @@ def main():
                 except (TypeError, ValueError):
                     pass
 
-            if pos_methods >= 2:
+            if pos_methods >= args.min_methods:
                 n_pos += 1
             if cf["cfel_sig"]:
                 n_cfell_sig += 1
@@ -486,17 +545,20 @@ def main():
             row = [
                 site,
                 round(mp,  6), round(fp, 6), round(fup, 6),
-                sl["slac_ds"], sl["slac_dn"], sl["slac_dndS"],
+                sl["slac_ds"], sl["slac_dn"], sl["slac_dN_minus_dS"],
                 sl["slac_p"], sl["slac_np"],
                 cf["cfel_beta_h2h"], cf["cfel_beta_ref"],
+                cf["cfel_subs_fg"], cf["cfel_perm_p"],
                 cf["cfel_p"], cf["cfel_q"], cf["cfel_sig"],
                 pr["prime_overall_p"],
-                pr["prime_volume_p"], pr["prime_polarity_p"], pr["prime_charge_p"],
-                pr["prime_hydrophobicity_p"], pr["prime_composition_p"],
+                pr["prime_hydrophobicity_p"], pr["prime_isoelectric_point_p"],
+                pr["prime_volume_p"], pr["prime_polarity_p"],
+                pr["prime_charge_p"], pr["prime_composition_p"],
                 pr["prime_sig_properties"],
                 pos_methods, neg_methods,
-                pos_methods >= 2,  # consensus_pos
-                neg_methods >= 2,  # consensus_neg
+                episodic_only,
+                pos_methods >= args.min_methods,  # consensus_pos
+                neg_methods >= args.min_methods,  # consensus_neg
                 h2h_stronger,
                 gard_warn,
                 args.virus_group, args.protein,
