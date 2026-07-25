@@ -15,11 +15,21 @@ Sekuens GISAID tidak boleh diredistribusikan, jadi sengaja tidak di-commit.
 
 Dari laptop, salin ke HPC:
 
+Folder itu harus mendarat **di dalam repo**, bukan di home, karena
+`config/config.yaml` menunjuknya dengan path relatif (`.dev/gisaid_epiniv/...`)
+dan Snakemake dijalankan dari root repo.
+
+Lakukan langkah 1 (clone) lebih dulu, lalu dari laptop:
+
 ```bash
 # jalankan di laptop, bukan di HPC
+# ganti <repo-di-hpc> dengan path repo hasil clone, mis:
+#   /datadrive/drive_a/engkinandatama/h2h
 scp -r ~/projects/h2h-genomic-signatures/.dev/gisaid_epiniv \
-    <user>@<hpc-host>:~/h2h-gisaid-data
+    <user>@<hpc-host>:<repo-di-hpc>/.dev/
 ```
+
+Kalau `.dev` belum ada di HPC, buat dulu di sana: `mkdir -p <repo-di-hpc>/.dev`.
 
 Kalau kamu memilih menjalankan tanpa GISAID, lewati langkah ini dan kosongkan
 blok `gisaid_sources` di config nanti. Pipeline tetap jalan, hanya kehilangan
@@ -53,9 +63,14 @@ snakemake --version   # harus keluar angka, bukan error
 ## 2. Pasang data GISAID dan kunci API
 
 ```bash
-mkdir -p .dev
-cp -r ~/h2h-gisaid-data .dev/gisaid_epiniv
-ls .dev/gisaid_epiniv/          # harus ada .fasta dan _merged_metadata.tsv
+# verifikasi kedua file yang dibaca config benar-benar ada
+python3 -c "
+import yaml, os
+c = yaml.safe_load(open('config/config.yaml'))
+for tax, src in c.get('gisaid_sources', {}).items():
+    for k, v in src.items():
+        print(f'  {k:9s}', 'ADA   ' if os.path.exists(v) else 'HILANG', v)
+"
 
 export NCBI_API_KEY="<kunci-anda>"
 echo "${NCBI_API_KEY:0:6}..."   # cek terisi, jangan cetak penuh
