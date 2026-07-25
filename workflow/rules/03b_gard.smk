@@ -49,12 +49,17 @@ rule hyphy_gard:
             exit 0
         fi
 
+        # ENV=TOLERATE_NUMERICAL_ERRORS must be a command-line argument; HyPhy does not
+        # read it from the process environment. Writing --output-lf to /dev/null makes
+        # HyPhy try to create '/dev/null.fit.bf', which fails, so use a real path.
         hyphy gard \
             --alignment {input.codon_aln} \
             --output {output.json} \
-            --output-lf /dev/null \
-            CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: GARD failed" >> {log})
+            --output-lf {output.json}.lf \
+            CPU={threads} \
+            ENV=TOLERATE_NUMERICAL_ERRORS=1; >> {log} 2>&1 \
+            || (echo '{{"status": "FAILED"}}' > {output.json} \
+                && echo "ERROR: GARD did not complete; see above." >> {log})
 
         # Parse JSON to write human-readable summary
         python workflow/scripts/parse_gard.py \

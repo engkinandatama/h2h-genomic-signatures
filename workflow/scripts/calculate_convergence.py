@@ -52,15 +52,35 @@ def parse_args():
     parser.add_argument("--out_correlation", required=True, help="Output selection-category correlation plot PNG")
     return parser.parse_args()
 
-def parse_group_metadata(group_name):
-    metadata = {
-        "Andes_virus": ("Hantaviridae", "H2H"),
-        "Sin_Nombre_virus": ("Hantaviridae", "Spillover"),
-        "Puumala_virus": ("Hantaviridae", "Spillover"),
-        "Nipah_Bangladesh": ("Paramyxoviridae", "H2H"),
-        "Nipah_Malaysia": ("Paramyxoviridae", "Spillover"),
-        "Ebola_Zaire": ("Filoviridae", "H2H")
-    }
+def load_group_metadata(config_path="config/config.yaml"):
+    """
+    Build {group: (family, category)} from the config rather than a literal map.
+
+    The previous hardcoded table silently returned ("Unknown", "Unknown") for any
+    group added or renamed in the config, which dropped that group out of every
+    downstream comparison without a warning.
+    """
+    import yaml
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh)
+    viruses = cfg.get("viruses", {})
+    out = {}
+    for group, spec in cfg.get("virus_groups", {}).items():
+        cats = [viruses[v]["category"] for v in spec.get("viruses", [])
+                if v in viruses]
+        # The group's phenotype is whichever category is not the reservoir arm.
+        non_res = [c for c in cats if c != "Reservoir"]
+        out[group] = (spec.get("family", "Unknown"),
+                      non_res[0] if non_res else "Reservoir")
+    return out
+
+
+def parse_group_metadata(group_name, metadata=None):
+    if metadata is None:
+        metadata = load_group_metadata()
+    if group_name not in metadata:
+        print(f"WARNING: group '{group_name}' is not in config/config.yaml; "
+              f"it will be excluded from group-level comparisons.", file=sys.stderr)
     return metadata.get(group_name, ("Unknown", "Unknown"))
 
 def get_protein_length(results_path, virus_group, protein):
@@ -68,19 +88,34 @@ def get_protein_length(results_path, virus_group, protein):
     # Try reading the merged protein FASTA file first
     faa_path = os.path.join(base_dir, "02_aligned", virus_group, f"{protein}_merged.faa")
     
+    # Read the LONGEST record, not the first. The first record is frequently a
+    # partial fragment, which produced protein lengths of 91 aa for Puumala L
+    # (true length ~2150) and 332 aa for Andes GnGc. Because selection_rate is
+    # num_selected / protein_length and the 100-bin coordinate is
+    # (site-1)/length*100, a short length inflates rates above 1.0 and collapses
+    # every site into the highest bins.
     if os.path.exists(faa_path):
         try:
-            with open(faa_path, 'r') as f:
-                f.readline() # Skip header
-                seq = []
-                for line in f:
+            longest = 0
+            current = 0
+            with open(faa_path) as fh:
+                for line in fh:
                     if line.startswith('>'):
-                        break
-                    seq.append(line.strip())
-                return len("".join(seq))
-        except Exception:
-            pass
-    return 1000 # Fallback
+                        longest = max(longest, current)
+                        current = 0
+                    else:
+                        current += len(line.strip())
+            longest = max(longest, current)
+            if longest > 0:
+                return longest
+        except Exception as exc:
+            print(f"WARNING: could not read {faa_path}: {exc}", file=sys.stderr)
+
+    # No silent magic number: a missing alignment is a pipeline failure, and
+    # returning a plausible-looking 1000 hid it inside every downstream rate.
+    raise FileNotFoundError(
+        f"Cannot determine protein length for {virus_group}/{protein}: "
+        f"{faa_path} is missing or unreadable.")
 
 def main():
     args = parse_args()
@@ -258,9 +293,11 @@ def main():
     # =========================================================================
     print("\n--- LEVEL 3: Jaccard Similarity & Permutation Test (10K Permutations) ---")
     
-    # 6 virus groups
-    groups = ["Andes_virus", "Sin_Nombre_virus", "Puumala_virus", "Nipah_Bangladesh", "Nipah_Malaysia", "Ebola_Zaire"]
+    # Groups come from whatever the run actually produced, not a fixed list, so
+    # adding or renaming a group in the config cannot silently drop it here.
+    groups = sorted(df_results['virus_group'].unique())
     n_groups = len(groups)
+    print(f"Jaccard over {n_groups} groups: {groups}")
     
     # Kita bangun profil binning 200 bin untuk setiap group
     # 100 bin untuk Entry protein, 100 bin untuk Replication protein

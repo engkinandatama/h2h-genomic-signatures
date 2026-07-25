@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+"""
+Cross-family convergence analysis over the 100-bin normalised coordinate.
+
+This replaces the standalone analysis_v4 script that produced the manuscript's
+headline numbers but was never part of the workflow, so `snakemake` reproduced
+none of them. Three substantive changes were made while porting it:
+
+1. Site selection follows one stated rule. The previous version hardcoded nine
+   site numbers for three datasets (Andes L, Ebola GP, Ebola L). Those literals
+   matched no computable criterion: applying the documented "significant in >= 2
+   of three site-level methods" rule yields zero sites for Andes L and Ebola L,
+   and one of the hardcoded sites (Andes L 245) has FEL alpha=2.68, beta=0.0,
+   i.e. maximal purifying selection.
+
+2. Bin co-occurrence is tested against a null model. It was previously reported
+   as a raw count of overlaps, so "three groups share bin 12" carried no p-value.
+
+3. Domain enrichment conditions on sites the test could actually reach.
+   Contrast-FEL returns a result only where both clades vary; counting untested
+   positions as "tested and not selected" inflates the odds ratio, because
+   testable sites are themselves concentrated in the N-terminus.
+
+Both raw and FDR-corrected results are written so that the reported threshold is
+an explicit choice rather than an artefact of which column was read.
+"""
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import yaml
+from scipy.stats import fisher_exact
+from statsmodels.stats.multitest import multipletests
+
+PROTEIN_ROLE = {
+    "GnGc": "Entry",
+    "G_protein": "Entry",
+    "F_protein": "Entry_Helper",
+    "GP": "Entry",
+    "L_protein": "Replication",
+}
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--all-sites", nargs="+", required=True, dest="all_sites",
+                   help="Per virus_group/protein *_all_sites.tsv files")
+    p.add_argument("--config", default="config/config.yaml")
+    p.add_argument("--outdir", required=True)
+    p.add_argument("--pvalue", type=float, default=0.05)
+    p.add_argument("--fdr", type=float, default=0.05)
+    p.add_argument("--permutations", type=int, default=20000)
+    p.add_argument("--gard-summaries", nargs="*", default=[], dest="gard",
+                   help="Per dataset *_gard_summary.txt; sites closer than "
+                        "--breakpoint-margin codons to a detected breakpoint are "
+                        "flagged, and datasets whose GARD run failed are marked "
+                        "unknown rather than clean")
+    p.add_argument("--breakpoint-margin", type=int, default=10,
+                   dest="bp_margin")
+    p.add_argument("--seed", type=int, default=42)
+    return p.parse_args()
+
+
+def load_config(path):
+    with open(path) as fh:
+        return yaml.safe_load(fh)
+
+
+def group_metadata(cfg):
+    viruses = cfg.get("viruses", {})
+    meta = {}
+    for group, spec in cfg.get("virus_groups", {}).items():
+        cats = [viruses[v]["category"] for v in spec.get("viruses", [])
+                if v in viruses]
+        non_res = [c for c in cats if c != "Reservoir"]
+        meta[group] = {
+            "family": spec.get("family", "Unknown"),
+            "category": non_res[0] if non_res else "Reservoir",
+            "has_contrast": "Reservoir" in cats and bool(set(cats) - {"Reservoir"}),
+        }
+    return meta
+
+
+def load_gard(paths):
+    """
+    Map (group, protein) -> {"status": ..., "breakpoints": [codon, ...]}.
+
+    A failed GARD run yields status FAILED, never an empty breakpoint list, so a
+    crash cannot be read downstream as "no recombination detected". This is the
+    distinction the previous pipeline collapsed, which is how the manuscript came
+    to state that screening had confirmed the sites were clean.
+    """
+    out = {}
+    for path in paths:
+        p = Path(path)
+        group = p.parent.name
+        protein = p.name.replace("_gard_summary.txt", "")
+        try:
+            rows = list(pd.read_csv(path, sep="\t").itertuples())
+        except Exception:
+            out[(group, protein)] = {"status": "UNREADABLE", "breakpoints": []}
+            continue
+        if not rows:
+            out[(group, protein)] = {"status": "UNREADABLE", "breakpoints": []}
+            continue
+        r = rows[0]
+        status = getattr(r, "status", "OK")
+        raw = str(getattr(r, "breakpoint_positions", "None"))
+        bps = []
+        if raw not in ("None", "nan", "NA", ""):
+            for tok in raw.split(","):
+                try:
+                    bps.append(int(int(tok) / 3))   # nucleotide -> codon
+                except ValueError:
+                    pass
+        out[(group, protein)] = {"status": status, "breakpoints": bps}
+    return out
+
+
+def annotate_recombination(df, gard, margin):
+    """Flag sites near a breakpoint, and mark datasets whose GARD run failed."""
+    status, near = [], []
+    for group, protein, site in zip(df.virus_group, df.protein, df.site):
+        info = gard.get((group, protein))
+        if info is None:
+            status.append("NOT_RUN"); near.append(False); continue
+        status.append(info["status"])
+        near.append(any(abs(site - bp) <= margin for bp in info["breakpoints"]))
+    df["gard_status"] = status
+    df["near_breakpoint"] = near
+    return df
+
+
+def infer_group_protein(path):
+    """<...>/04_selection/<virus_group>/<protein>_all_sites.tsv"""
+    p = Path(path)
+    return p.parent.name, p.name.replace("_all_sites.tsv", "")
+
+
+def load_sites(paths, meta):
+    """
+    Read every site table and mark differential sites under one rule.
+
+    Groups that have a reservoir arm use the branch contrast (Contrast-FEL).
+    Groups without one cannot run it at all, so they fall back to agreement
+    between site-level models. Which branch applies is decided by the group's
+    composition in the config, never by the group's name.
+    """
+    frames = []
+    for path in paths:
+        group, protein = infer_group_protein(path)
+        if group not in meta:
+            print(f"WARNING: {group} is absent from the config; skipping {path}",
+                  file=sys.stderr)
+            continue
+        df = pd.read_csv(path, sep="\t")
+        if df.empty:
+            print(f"WARNING: {path} has no rows; skipping", file=sys.stderr)
+            continue
+        df["virus_group"] = group
+        df["protein"] = protein
+        df["role"] = PROTEIN_ROLE.get(protein, "Other")
+        df["family"] = meta[group]["family"]
+        df["category"] = meta[group]["category"]
+        df["mode"] = "contrast" if meta[group]["has_contrast"] else "site_level"
+        frames.append(df)
+
+    if not frames:
+        sys.exit("ERROR: no usable site tables were read.")
+    return pd.concat(frames, ignore_index=True)
+
+
+def mark_differential(df, pval):
+    for col in ("cfel_p", "cfel_beta_h2h", "cfel_beta_ref", "cfel_q"):
+        if col in df:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    consensus = df.get("consensus_pos", pd.Series(False, index=df.index))
+    consensus = consensus.astype(str).str.lower().eq("true")
+
+    contrast_hit = (
+        df["mode"].eq("contrast")
+        & df["cfel_p"].lt(pval)
+        & df["cfel_beta_h2h"].gt(df["cfel_beta_ref"])
+    )
+    site_level_hit = df["mode"].eq("site_level") & consensus
+
+    df["differential"] = (contrast_hit | site_level_hit).fillna(False)
+    # A site is "testable" when the contrast actually produced an estimate.
+    df["testable"] = df["mode"].eq("site_level") | df["cfel_p"].lt(1.0)
+    if "cfel_q" in df:
+        df["differential_fdr"] = df["differential"] & df["cfel_q"].lt(pval)
+    else:
+        df["differential_fdr"] = False
+    return df
+
+
+def add_bins(df):
+    """
+    Normalise each site onto a 100-bin coordinate using the true protein length.
+
+    Length is taken as the maximum site index observed for that protein, which
+    equals the alignment width in codons; this avoids the earlier bug where a
+    partial first record set the length to 91 for a 2150-residue protein.
+    """
+    lengths = df.groupby(["virus_group", "protein"])["site"].max().rename("protein_length")
+    df = df.merge(lengths, on=["virus_group", "protein"], how="left")
+    df["bin_100"] = ((df["site"] - 1) / df["protein_length"] * 100).astype(int).clip(0, 99)
+    return df
+
+
+def hotspot_permutation(df_diff, df_all, role, n_perm, rng):
+    """
+    Probability that some bin in this role is shared by as many groups as the
+    best observed bin, when each group's sites are placed at random over the
+    bins the contrast could actually reach.
+
+    Restricting the null to testable bins matters: testable positions are not
+    uniform along the protein, so a uniform null would overstate significance.
+    """
+    diff = df_diff[df_diff.role == role]
+    if diff.empty:
+        return None
+
+    observed = (diff.groupby(["bin_100", "virus_group"]).size()
+                .reset_index(name="n")
+                .groupby("bin_100")["virus_group"].nunique())
+    if observed.empty:
+        return None
+    best = int(observed.max())
+
+    pools, counts = {}, {}
+    for group, sub in diff.groupby("virus_group"):
+        testable = df_all[(df_all.virus_group == group)
+                          & (df_all.role == role)
+                          & (df_all.testable)]
+        pool = testable["bin_100"].unique()
+        if len(pool) == 0:
+            pool = np.arange(100)
+        pools[group] = pool
+        counts[group] = sub["bin_100"].nunique()
+
+    hits = 0
+    for _ in range(n_perm):
+        seen = {}
+        for group, pool in pools.items():
+            k = min(counts[group], len(pool))
+            for b in rng.choice(pool, size=k, replace=False):
+                seen[b] = seen.get(b, 0) + 1
+        if seen and max(seen.values()) >= best:
+            hits += 1
+    return {"role": role, "max_groups_observed": best,
+            "permutations": n_perm, "p_value": (hits + 1) / (n_perm + 1)}
+
+
+def domain_enrichment(df_all, df_diff, domains, fdr):
+    """
+    Fisher's exact test per protein and domain, with the denominator limited to
+    sites the contrast could reach.
+    """
+    records = []
+    for (protein,), sub in df_all.groupby(["protein"]):
+        key = protein.lower()
+        if key not in domains:
+            continue
+        tested = sub[sub.testable]
+        sel = df_diff[df_diff.protein == protein]
+        for dom_name, (start, end) in domains[key].items():
+            in_dom = tested[(tested.site >= start) & (tested.site <= end)]
+            out_dom = tested[(tested.site < start) | (tested.site > end)]
+            sel_in = len(sel[(sel.site >= start) & (sel.site <= end)])
+            sel_out = len(sel) - sel_in
+            table = [[sel_in, len(in_dom) - sel_in],
+                     [sel_out, len(out_dom) - sel_out]]
+            if min(len(in_dom), len(out_dom)) == 0:
+                continue
+            odds, p = fisher_exact(table)
+            records.append({"protein": protein, "domain": dom_name,
+                            "domain_start": start, "domain_end": end,
+                            "selected_in_domain": sel_in,
+                            "tested_in_domain": len(in_dom),
+                            "selected_outside": sel_out,
+                            "tested_outside": len(out_dom),
+                            "odds_ratio": odds, "p_value": p})
+    if not records:
+        return pd.DataFrame()
+    out = pd.DataFrame(records).sort_values("p_value")
+    reject, q, _, _ = multipletests(out["p_value"], alpha=fdr, method="fdr_bh")
+    out["q_value"] = q
+    out["significant_fdr"] = reject
+    return out
+
+
+def main():
+    args = parse_args()
+    os.makedirs(args.outdir, exist_ok=True)
+    rng = np.random.default_rng(args.seed)
+
+    cfg = load_config(args.config)
+    meta = group_metadata(cfg)
+    domains = cfg.get("protein_domains", {})
+    if not domains:
+        print("WARNING: no protein_domains in config; domain enrichment skipped.",
+              file=sys.stderr)
+
+    df = load_sites(args.all_sites, meta)
+    df = mark_differential(df, args.pvalue)
+    df = add_bins(df)
+
+    gard = load_gard(args.gard)
+    df = annotate_recombination(df, gard, args.bp_margin)
+
+    df_diff = df[df.differential].copy()
+    df_diff.to_csv(Path(args.outdir) / "differential_sites.tsv",
+                   sep="\t", index=False)
+
+    counts = (df_diff.groupby(["virus_group", "category", "protein"])
+              .size().reset_index(name="n_differential"))
+    counts.to_csv(Path(args.outdir) / "differential_site_counts.tsv",
+                  sep="\t", index=False)
+
+    # Bin co-occurrence, with the null model the previous version lacked.
+    pivot = (df_diff.groupby(["role", "bin_100", "virus_group"]).size()
+             .reset_index(name="n")
+             .pivot_table(index=["role", "bin_100"], columns="virus_group",
+                          values="n", aggfunc="sum").fillna(0))
+    if not pivot.empty:
+        pivot["n_groups"] = (pivot > 0).sum(axis=1)
+        hotspots = pivot[pivot.n_groups >= 2].sort_values("n_groups", ascending=False)
+        hotspots.to_csv(Path(args.outdir) / "hotspot_bins.tsv", sep="\t")
+    else:
+        hotspots = pd.DataFrame()
+
+    perm = [r for r in (hotspot_permutation(df_diff, df, role, args.permutations, rng)
+                        for role in sorted(df_diff.role.unique())) if r]
+    pd.DataFrame(perm).to_csv(Path(args.outdir) / "hotspot_permutation_test.tsv",
+                              sep="\t", index=False)
+
+    dom = domain_enrichment(df, df_diff, domains, args.fdr)
+    if not dom.empty:
+        dom.to_csv(Path(args.outdir) / "domain_enrichment.tsv", sep="\t", index=False)
+
+    summary = {
+        "n_sites_total": int(len(df)),
+        "n_sites_testable": int(df.testable.sum()),
+        "n_differential_raw_p": int(len(df_diff)),
+        "n_differential_after_fdr": int(df.differential_fdr.sum()),
+        "threshold_raw_p": args.pvalue,
+        "groups": {g: int(n) for g, n in df_diff.virus_group.value_counts().items()},
+        "hotspot_bins": int(len(hotspots)),
+        "permutation_tests": perm,
+        "domains_significant_after_fdr": (
+            int(dom.significant_fdr.sum()) if not dom.empty else 0),
+        "recombination": {
+            "datasets_screened_ok": int(sum(
+                1 for v in gard.values() if v["status"] == "OK")),
+            "datasets_failed_or_missing": int(sum(
+                1 for v in gard.values() if v["status"] != "OK")),
+            "differential_sites_near_breakpoint": int(df_diff.near_breakpoint.sum())
+                if "near_breakpoint" in df_diff else 0,
+            "breakpoint_margin_codons": args.bp_margin,
+        },
+    }
+    with open(Path(args.outdir) / "convergence_summary.json", "w") as fh:
+        json.dump(summary, fh, indent=2)
+
+    print(json.dumps(summary, indent=2))
+    if summary["n_differential_after_fdr"] == 0 and summary["n_differential_raw_p"]:
+        print("\nNOTE: no differential site survives FDR correction. The counts "
+              "above are uncorrected and must be reported as exploratory.",
+              file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

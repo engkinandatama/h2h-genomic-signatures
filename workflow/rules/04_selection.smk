@@ -47,7 +47,7 @@ rule hyphy_meme:
         echo "Running HyPhy MEME for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
         
@@ -56,7 +56,7 @@ rule hyphy_meme:
             --tree {input.tree} \
             --output {output.json} \
             CPU={threads} \
-            --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy MEME failed, created empty JSON" >> {log})
+            --branches Foreground >> {log} 2>&1 || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy MEME failed, created empty JSON" >> {log})
         """
 
 rule hyphy_fel:
@@ -81,7 +81,7 @@ rule hyphy_fel:
         echo "Running HyPhy FEL for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
         
@@ -90,7 +90,7 @@ rule hyphy_fel:
             --tree {input.tree} \
             --output {output.json} \
             CPU={threads} \
-            --branches Foreground >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FEL failed, created empty JSON" >> {log})
+            --branches Foreground >> {log} 2>&1 || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy FEL failed, created empty JSON" >> {log})
         """
 
 rule hyphy_fubar:
@@ -115,15 +115,20 @@ rule hyphy_fubar:
         echo "Running HyPhy FUBAR for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
         
+        # Remove any stale grid cache: HyPhy reuses *.FUBAR.cache without checking
+        # that it matches the current alignment, which both skips the computation
+        # and crashes when alignment dimensions have changed.
+        rm -f {input.codon_aln}.FUBAR.cache
+
         hyphy fubar \
             --alignment {input.codon_aln} \
             --tree {input.tree} \
             --output {output.json} \
-            CPU={threads} >> {log} 2>&1 || (echo '{{}}' > {output.json} && echo "Warning: HyPhy FUBAR failed, created empty JSON" >> {log})
+            CPU={threads} >> {log} 2>&1 || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy FUBAR failed, created empty JSON" >> {log})
         """
 
 rule aggregate_selection:
@@ -197,7 +202,7 @@ rule hyphy_busted:
         echo "Running HyPhy BUSTED for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -207,7 +212,7 @@ rule hyphy_busted:
             --output {output.json} \
             --branches Foreground \
             CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy BUSTED failed, created empty JSON" >> {log})
+            || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy BUSTED failed, created empty JSON" >> {log})
         """
 
 
@@ -239,7 +244,7 @@ rule hyphy_absrel:
         echo "Running HyPhy aBSREL for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -249,7 +254,7 @@ rule hyphy_absrel:
             --output {output.json} \
             --branches Foreground \
             CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy aBSREL failed, created empty JSON" >> {log})
+            || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy aBSREL failed, created empty JSON" >> {log})
         """
 
 
@@ -266,6 +271,8 @@ rule hyphy_relax:
         tree=WORKDIR + "/03_trees/{virus_group}/{protein}_labeled.treefile"
     output:
         json=WORKDIR + "/04_selection/{virus_group}/{protein}_relax.json"
+    params:
+        branch_contrast=lambda w: has_branch_contrast(w.virus_group)
     log:
         WORKDIR + "/logs/hyphy_relax/{virus_group}_{protein}.log"
     benchmark:
@@ -280,9 +287,17 @@ rule hyphy_relax:
     shell:
         """
         echo "Running HyPhy RELAX for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+
+        if [ "{params.branch_contrast}" != "True" ]; then
+            echo "NOT APPLICABLE: {wildcards.virus_group} has no reservoir group, so there" >> {log}
+            echo "is no reference branch set. RELAX is not run." >> {log}
+            echo '{{"status": "NOT_APPLICABLE"}}' > {output.json}
+            exit 0
+        fi
+
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
-            echo "SKIP: Input tree atau alignment kosong. Membuat output JSON kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo "ERROR: Input tree atau alignment kosong." >> {log}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -293,7 +308,7 @@ rule hyphy_relax:
             --test Foreground \
             --reference Reference \
             CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: HyPhy RELAX failed, created empty JSON" >> {log})
+            || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: HyPhy RELAX failed, created empty JSON" >> {log})
         """
 
 
@@ -359,7 +374,7 @@ rule hyphy_slac:
         echo "Running HyPhy SLAC for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -369,7 +384,7 @@ rule hyphy_slac:
             --branches All \
             --output {output.json} \
             CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: SLAC failed" >> {log})
+            || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: SLAC did not complete" >> {log})
         """
 
 
@@ -391,6 +406,8 @@ rule hyphy_contrast_fel:
         tree=WORKDIR + "/03_trees/{virus_group}/{protein}_labeled.treefile"
     output:
         json=WORKDIR + "/04_selection/{virus_group}/{protein}_contrast_fel.json"
+    params:
+        branch_contrast=lambda w: has_branch_contrast(w.virus_group)
     log:
         WORKDIR + "/logs/hyphy_contrast_fel/{virus_group}_{protein}.log"
     benchmark:
@@ -405,9 +422,17 @@ rule hyphy_contrast_fel:
     shell:
         """
         echo "Running HyPhy Contrast-FEL for {wildcards.virus_group} - {wildcards.protein}..." > {log}
+
+        if [ "{params.branch_contrast}" != "True" ]; then
+            echo "NOT APPLICABLE: {wildcards.virus_group} has no reservoir group, so no" >> {log}
+            echo "foreground/background partition exists. Contrast-FEL is not run." >> {log}
+            echo '{{"status": "NOT_APPLICABLE"}}' > {output.json}
+            exit 0
+        fi
+
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
-            echo "SKIP: Input tree atau alignment kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo "ERROR: Input tree atau alignment kosong." >> {log}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -416,8 +441,10 @@ rule hyphy_contrast_fel:
             --tree {input.tree} \
             --branch-set Foreground \
             --output {output.json} \
-            CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: Contrast-FEL failed" >> {log})
+            CPU={threads} \
+            ENV=TOLERATE_NUMERICAL_ERRORS=1; >> {log} 2>&1 \
+            || (echo '{{"status": "FAILED"}}' > {output.json} \
+                && echo "ERROR: Contrast-FEL did not complete." >> {log})
         """
 
 
@@ -456,7 +483,7 @@ rule hyphy_prime:
         echo "Running HyPhy PRIME for {wildcards.virus_group} - {wildcards.protein}..." > {log}
         if [ ! -s "{input.tree}" ] || [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Input tree atau alignment kosong." >> {log}
-            echo '{{}}' > {output.json}
+            echo '{{"status": "FAILED"}}' > {output.json}
             exit 0
         fi
 
@@ -466,7 +493,7 @@ rule hyphy_prime:
             --branches Foreground \
             --output {output.json} \
             CPU={threads} >> {log} 2>&1 \
-            || (echo '{{}}' > {output.json} && echo "Warning: PRIME failed" >> {log})
+            || (echo '{{"status": "FAILED"}}' > {output.json} && echo "ERROR: PRIME did not complete" >> {log})
         """
 
 
@@ -498,6 +525,7 @@ rule aggregate_all_selection:
         WORKDIR + "/benchmarks/aggregate_all_selection/{virus_group}_{protein}.tsv"
     params:
         pval=config.get("params", {}).get("hyphy", {}).get("pvalue_threshold", 0.05),
+        min_methods=config.get("params", {}).get("hyphy", {}).get("min_methods", 2),
         fubar_pp=config.get("params", {}).get("hyphy", {}).get("fubar_pp_threshold", 0.90),
         cfdr=config.get("params", {}).get("hyphy", {}).get("contrast_fel_fdr", 0.20)
     conda:
@@ -516,6 +544,7 @@ rule aggregate_all_selection:
             --pvalue       {params.pval} \
             --fubar-pp     {params.fubar_pp} \
             --contrast-fdr {params.cfdr} \
+            --min-methods  {params.min_methods} \
             --virus-group  {wildcards.virus_group} \
             --protein      {wildcards.protein} \
             --out          {output.full_table} >> {log} 2>&1

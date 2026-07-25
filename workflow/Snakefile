@@ -14,6 +14,41 @@ ALL_PROTEINS = set()
 for vg in config["virus_groups"].values():
     ALL_PROTEINS.update(vg["proteins"])
 
+
+def reference_uniprot(virus, protein):
+    """
+    Per-protein UniProt accession for a member virus.
+
+    The `viruses:` block carries a single uniprot_id per entry, so reading it
+    directly would hand the G-protein accession to F and L as well. The correct
+    per-protein accessions live in the `virus_groups:` block, so resolve through
+    whichever group contains this virus and fall back only if nothing is found.
+    """
+    for group, spec in config["virus_groups"].items():
+        if virus in spec.get("viruses", []):
+            ids = spec.get("uniprot_ids", {})
+            if protein in ids:
+                return ids[protein]
+            if spec.get("uniprot_id"):
+                return spec["uniprot_id"]
+    return config["viruses"].get(virus, {}).get("uniprot_id", "")
+
+
+def has_branch_contrast(virus_group):
+    """
+    True when the group contains both reservoir-derived and human-derived viruses,
+    so a foreground/background partition of the tree exists.
+
+    Contrast-FEL and RELAX compare two branch sets and are meaningless without
+    both. Ebola_Zaire has no usable reservoir group in public data and is analysed
+    as a positive control with site-level models only, so those two tests must be
+    skipped for it explicitly rather than left to fail at runtime.
+    """
+    members = config["virus_groups"][virus_group]["viruses"]
+    cats = {config["viruses"][v]["category"]
+            for v in members if v in config["viruses"]}
+    return "Reservoir" in cats and bool(cats - {"Reservoir"})
+
 wildcard_constraints:
     protein="|".join(ALL_PROTEINS),
     virus_group="|".join(VIRUS_GROUPS)
@@ -52,15 +87,25 @@ for vg in VIRUS_GROUPS:
 
         # ── 3D Structure visualization ──────────────────────────────────────
         TARGETS.append(f"{WORKDIR}/05_structure/{vg}/{p}_3d_view.html")
+        TARGETS.append(f"{WORKDIR}/05_structure/{vg}/{p}_coordinate_map.tsv")
 
         # ── Manhattan plot ──────────────────────────────────────────────────
         TARGETS.append(f"{WORKDIR}/07_figures/{vg}/{p}_manhattan.png")
 
 # ── Convergence statistics (one file for all groups) ───────────────────────
-TARGETS.append(f"{WORKDIR}/06_statistics/convergent_signature_matrix.csv")
-TARGETS.append(f"{WORKDIR}/06_statistics/jaccard_similarity_heatmap.png")
-TARGETS.append(f"{WORKDIR}/06_statistics/selection_phenotype_correlation.png")
+# calculate_convergence.py is retired. It duplicated analyze_convergence.py for
+# the same question while using a uniform-bin Jaccard null that ignores which
+# bins the contrast could actually reach, and it consumed the min_methods=1
+# consensus file rather than the >=2 rule the analysis states. Keeping both would
+# have published two different answers to one question. The script remains in the
+# tree for reference but is no longer a target.
 
+
+# Cross-family convergence analysis (one job over all groups)
+TARGETS.append(f"{WORKDIR}/06_statistics/differential_sites.tsv")
+TARGETS.append(f"{WORKDIR}/06_statistics/hotspot_bins.tsv")
+TARGETS.append(f"{WORKDIR}/06_statistics/hotspot_permutation_test.tsv")
+TARGETS.append(f"{WORKDIR}/06_statistics/convergence_summary.json")
 
 rule all:
     input:
