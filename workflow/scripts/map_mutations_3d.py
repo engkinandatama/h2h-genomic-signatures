@@ -10,7 +10,62 @@ def parse_args():
     parser.add_argument("--selection", required=True, help="HyPhy selection results txt/json")
     parser.add_argument("--out_pdb", required=True, help="Output annotated PDB file")
     parser.add_argument("--out_html", required=True, help="Output Py3Dmol HTML viewer")
+    parser.add_argument("--alignment", default="",
+                        help="Codon alignment used to derive the site numbering. "
+                             "Required to convert alignment columns into UniProt "
+                             "residue numbers; without it the columns are used "
+                             "directly, which is only correct for a gapless "
+                             "alignment of a full-length reference.")
+    parser.add_argument("--out_mapping", default="",
+                        help="Optional TSV recording alignment column -> UniProt "
+                             "residue -> PDB residue for every mapped site")
     return parser.parse_args()
+
+
+def read_fasta(path):
+    recs, name, chunks = [], None, []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line.startswith(">"):
+                if name is not None:
+                    recs.append((name, "".join(chunks)))
+                name, chunks = line[1:], []
+            elif line:
+                chunks.append(line)
+    if name is not None:
+        recs.append((name, "".join(chunks)))
+    return recs
+
+
+def build_column_to_residue_map(alignment_path):
+    """
+    Map 1-based codon-alignment column -> 1-based residue number in the
+    least-gapped sequence of the alignment.
+
+    Selection sites are numbered by alignment column. AlphaFold numbers residues
+    by position in the protein. Those coincide only when the reference sequence
+    has no gaps, which is false whenever the alignment contains partial
+    sequences: for Andes GnGc the offset reaches -44 by the C-terminus.
+    """
+    recs = read_fasta(alignment_path)
+    if not recs:
+        return {}, None
+    # Codon alignments are nucleotide; collapse each codon to one column.
+    best_name, best_seq, best_gaps = None, None, None
+    for name, seq in recs:
+        gaps = seq.count("-")
+        if best_gaps is None or gaps < best_gaps:
+            best_name, best_seq, best_gaps = name, seq, gaps
+
+    mapping, residue = {}, 0
+    n_codons = len(best_seq) // 3
+    for col in range(1, n_codons + 1):
+        codon = best_seq[(col - 1) * 3: col * 3]
+        if codon and codon != "---" and "-" not in codon:
+            residue += 1
+            mapping[col] = residue
+    return mapping, best_name
 
 def read_selection_sites(results_path):
     sites = []
@@ -37,10 +92,12 @@ def read_selection_sites(results_path):
             parts = line.split('\t')
             try:
                 site = int(parts[site_idx])
-                # Jika format lama (cfel_sig_idx == -1), anggap semua baris adalah seleksi positif.
-                # Jika format baru, cek apakah cfel_sig adalah 'Yes'.
+                # parse_additional_selection.py writes this column with str(bool),
+                # so the values are "True"/"False" and never "Yes". Comparing
+                # against 'Yes' matched nothing and produced all-blue structures.
                 if cfel_sig_idx != -1:
-                    if len(parts) > cfel_sig_idx and parts[cfel_sig_idx] == 'Yes':
+                    if (len(parts) > cfel_sig_idx
+                            and parts[cfel_sig_idx].strip().lower() == "true"):
                         sites.append(site)
                 else:
                     sites.append(site)
@@ -65,13 +122,22 @@ def download_alphafold_pdb(uniprot_id, temp_path):
                 # Cari entri yang cocok atau gunakan entri pertama
                 entry = data[0]
                 pdb_url = entry.get("pdbUrl")
+                # AlphaFold now serves fragment models for long proteins: the PDB
+                # restarts numbering at 1 while covering UniProt uniprotStart..End.
+                # For the L proteins here that offset is +562 to +1292, so ignoring
+                # it mislabels every mapped residue.
+                u_start = entry.get("uniprotStart")
+                u_end = entry.get("uniprotEnd")
+                if u_start:
+                    print(f"AlphaFold model covers UniProt {u_start}-{u_end} "
+                          f"(PDB residue 1 = UniProt {u_start})")
                 if pdb_url:
                     print(f"Mencoba mengunduh PDB dari API URL: {pdb_url}")
                     pdb_req = urllib.request.Request(pdb_url, headers=headers)
                     with urllib.request.urlopen(pdb_req, timeout=15) as pdb_resp, open(temp_path, 'wb') as out_file:
                         out_file.write(pdb_resp.read())
                     print(f"PDB berhasil diunduh ke {temp_path}")
-                    return True
+                    return True, int(u_start) if u_start else 1
     except Exception as e:
         print(f"Peringatan: Gagal kueri API AlphaFold untuk {uniprot_id}: {e}")
 
@@ -83,21 +149,38 @@ def download_alphafold_pdb(uniprot_id, temp_path):
         with urllib.request.urlopen(req, timeout=15) as response, open(temp_path, 'wb') as out_file:
             out_file.write(response.read())
         print(f"PDB berhasil diunduh via fallback ke {temp_path}")
-        return True
+        # Static fallback URL is always fragment F1, i.e. UniProt offset 1.
+        return True, 1
     except Exception as e:
         print(f"Error: Gagal mengunduh PDB untuk UniProt {uniprot_id} via fallback: {e}")
-        return False
+        return False, 1
 
-def generate_fallback_pdb(out_path, uniprot_id):
-    # Menulis file PDB minimal tiruan jika download dari internet gagal
-    with open(out_path, 'w') as f:
-        f.write(f"HEADER    FALLBACK MOCK PDB FOR UNIPROT {uniprot_id}\n")
-        f.write("ATOM      1  N   MET A   1       0.000   0.000   0.000  1.00  0.00           N\n")
-        f.write("ATOM      2  CA  MET A   1       1.450   0.000   0.000  1.00  0.00           C\n")
-        f.write("ATOM      3  C   MET A   1       2.000   1.450   0.000  1.00  0.00           C\n")
-        f.write("ATOM      4  O   MET A   1       1.200   2.400   0.000  1.00  0.00           O\n")
-        f.write("TER\n")
-        f.write("END\n")
+def fail_no_structure(uniprot_id, out_pdb, out_html, n_sites):
+    """
+    Write an explicit 'no structure' marker instead of a mock PDB.
+
+    The previous fallback emitted a four-atom single-methionine PDB. That file
+    was indistinguishable from a real structure to every downstream step, so a
+    failed download was shipped as supplementary material for a 1148-residue
+    glycoprotein, complete with clickable site buttons that highlighted nothing.
+    """
+    with open(out_pdb, "w") as fh:
+        fh.write(f"REMARK  NO STRUCTURE AVAILABLE FOR UNIPROT {uniprot_id}\n")
+        fh.write("REMARK  AlphaFold DB returned no model for this accession.\n")
+        fh.write("REMARK  This file intentionally contains no ATOM records.\n")
+        fh.write("END\n")
+    with open(out_html, "w") as fh:
+        fh.write(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            f"<title>No structure - {uniprot_id}</title></head><body>"
+            "<h2>No 3D structure available</h2>"
+            f"<p>AlphaFold DB has no predicted model for UniProt "
+            f"<b>{uniprot_id}</b>, so the {n_sites} selection site(s) for this "
+            "protein could not be mapped onto a structure.</p>"
+            "<p>This page is a placeholder recording that absence. It is not a "
+            "failed render.</p></body></html>")
+    print(f"ERROR: no AlphaFold model for {uniprot_id}; wrote explicit "
+          f"no-structure markers.", file=sys.stderr)
 
 def main():
     args = parse_args()
@@ -111,14 +194,42 @@ def main():
     
     # 2. Download PDB
     temp_pdb = args.out_pdb + ".temp"
-    download_success = download_alphafold_pdb(args.uniprot, temp_pdb)
+    download_success, uniprot_start = download_alphafold_pdb(args.uniprot, temp_pdb)
     
     if not download_success:
-        print("Menggunakan fallback mock PDB karena unduhan gagal.")
-        generate_fallback_pdb(temp_pdb, args.uniprot)
-        
-    # 3. Petakan situs ke kolom B-factor PDB
-    positive_set = set(positive_sites)
+        fail_no_structure(args.uniprot, args.out_pdb, args.out_html,
+                          len(positive_sites))
+        return
+
+
+    # 3. Convert alignment columns into PDB residue numbers before colouring.
+    #    Two shifts are involved and both were previously ignored:
+    #      a) gaps in the alignment reference, so column != residue
+    #      b) fragment models, whose residue 1 is UniProt uniprot_start
+    col2res, ref_name = ({}, None)
+    if args.alignment and os.path.exists(args.alignment):
+        col2res, ref_name = build_column_to_residue_map(args.alignment)
+        print(f"Coordinate reference: {ref_name} "
+              f"({len(col2res)} ungapped codons)")
+    else:
+        print("WARNING: no alignment supplied; alignment columns are being used "
+              "directly as residue numbers. This is only correct for a gapless "
+              "full-length reference.", file=sys.stderr)
+
+    mapping_rows, positive_set, outside = [], set(), []
+    for col in positive_sites:
+        residue = col2res.get(col, col) if col2res else col
+        pdb_res = residue - uniprot_start + 1
+        if pdb_res < 1:
+            outside.append((col, residue, pdb_res))
+            continue
+        positive_set.add(pdb_res)
+        mapping_rows.append((col, residue, pdb_res))
+
+    if outside:
+        print(f"WARNING: {len(outside)} site(s) fall before the modelled region "
+              f"(UniProt {uniprot_start}+) and cannot be shown: "
+              f"{[c for c, _, _ in outside][:10]}", file=sys.stderr)
     pdb_content = []
     
     with open(temp_pdb, 'r') as infile, open(args.out_pdb, 'w') as outfile:
@@ -145,11 +256,48 @@ def main():
                 outfile.write(line)
                 pdb_content.append(line)
                 
+    # Report which mapped sites actually exist in the model, and record the
+    # full column -> UniProt -> PDB correspondence so the numbering used in the
+    # figures can be checked against the tables.
+    modelled = set()
+    for line in pdb_content:
+        if line.startswith("ATOM  ") or line.startswith("HETATM"):
+            try:
+                modelled.add(int(line[22:26].strip()))
+            except ValueError:
+                pass
+    missing = sorted(positive_set - modelled)
+    if missing:
+        print(f"WARNING: {len(missing)} site(s) map beyond the modelled region "
+              f"and are not shown: {missing[:10]}", file=sys.stderr)
+    print(f"Mapped {len(positive_set & modelled)}/{len(positive_sites)} sites "
+          f"onto the structure.")
+
+    if args.out_mapping:
+        os.makedirs(os.path.dirname(args.out_mapping) or ".", exist_ok=True)
+        with open(args.out_mapping, "w") as fh:
+            fh.write("alignment_column\treference_residue\tpdb_residue\t"
+                     "uniprot_residue\tin_model\n")
+            for col, res, pdb_res in mapping_rows:
+                fh.write(f"{col}\t{res}\t{pdb_res}\t{res}\t"
+                         f"{pdb_res in modelled}\n")
+
     # Hapus temp file
     if os.path.exists(temp_pdb):
         os.remove(temp_pdb)
         
     # 4. Buat viewer HTML statis
+    # Each button carries BOTH coordinates. The manuscript figure previously
+    # showed alignment columns while the accompanying table showed UniProt
+    # residues, so the same site appeared under two numbers 43 apart.
+    site_buttons = "".join(
+        f'<button class="site-btn" data-resi="{pdb_res}" '
+        f'title="alignment column {col} = UniProt residue {res}">'
+        f'{res}</button>'
+        for col, res, pdb_res in sorted(mapping_rows, key=lambda r: r[1])
+        if pdb_res in modelled) or (
+        '<span style="opacity:.7">No site could be mapped onto this model.</span>')
+
     pdb_data_js = "".join(pdb_content).replace("\n", "\\n").replace("\r", "").replace("'", "\\'")
     
     html_template = f"""<!DOCTYPE html>
@@ -158,7 +306,7 @@ def main():
     <meta charset="utf-8">
     <title>3D Structure Mapping - {args.uniprot}</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/3dmol/2.0.4/3Dmol-min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
     <style>
         body {{
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -196,6 +344,23 @@ def main():
             overflow: hidden;
             border: 1px solid #475569;
         }}
+        .site-strip {{
+            margin: 12px 0;
+            padding: 12px;
+            background-color: #0f172a;
+            border-radius: 8px;
+        }}
+        .site-btn {{
+            background-color: #1e40af;
+            color: #f8fafc;
+            border: 1px solid #3b82f6;
+            border-radius: 4px;
+            padding: 4px 9px;
+            margin: 2px;
+            cursor: pointer;
+            font-size: 13px;
+        }}
+        .site-btn:hover {{ background-color: #2563eb; }}
         .legend {{
             display: flex;
             gap: 24px;
@@ -243,6 +408,12 @@ def main():
             <strong>Jumlah Residu Terseleksi:</strong> {len(positive_sites)}
         </div>
         
+        <div class="site-strip">
+            <div style="margin-bottom:8px; font-weight:600;">
+                Mapped sites (UniProt numbering; hover for the alignment column):
+            </div>
+            {site_buttons}
+        </div>
         <div id="viewer"></div>
         
         <div class="legend">
@@ -271,17 +442,20 @@ def main():
         document.addEventListener("DOMContentLoaded", function() {{
             let element = document.getElementById("viewer");
             
-            // Cek apakah pustaka 3Dmol berhasil dimuat dari CDN
-            if (typeof $3Dmol === "undefined" && typeof 3Dmol === "undefined") {
+            // Cek apakah pustaka 3Dmol berhasil dimuat dari CDN.
+            // NOTE: "3Dmol" is not a legal JavaScript identifier (a numeral cannot
+            // start one), so `typeof 3Dmol` is a parse error that kills the whole
+            // script block. The library exposes itself as $3Dmol; when loaded via
+            // a plain <script> tag it is also reachable as window["3Dmol"].
+            var mol3D = (typeof $3Dmol !== "undefined") ? $3Dmol : window["3Dmol"];
+            if (!mol3D) {{
                 element.innerHTML = '<div style="color: #f87171; padding: 40px; text-align: center; font-weight: bold; font-family: system-ui, sans-serif; line-height: 1.6; margin-top: 150px;">' +
-                    '<span style="font-size: 24px;">⚠️ Gagal Memuat Visualisasi 3D</span><br><br>' +
+                    '<span style="font-size: 24px;">Gagal Memuat Visualisasi 3D</span><br><br>' +
                     'Pustaka visualisasi 3D (3Dmol.js) tidak dapat diunduh dari CDN.<br>' +
                     'Harap hubungkan komputer Anda ke internet, atau periksa apakah ekstensi penolak iklan (Ad-blocker) / firewall memblokir cdnjs.cloudflare.com.' +
                     '</div>';
                 return;
-            }
-            
-            let mol3D = typeof $3Dmol !== "undefined" ? $3Dmol : 3Dmol;
+            }}
             let viewer = mol3D.createViewer(element, {{}});
             
             let pdbData = '{pdb_data_js}';
@@ -299,6 +473,23 @@ def main():
             
             viewer.zoomTo();
             viewer.render();
+
+            // Focus a residue when its button is clicked. selectedAtoms() is the
+            // 3Dmol API; an earlier revision called getAtoms(), which does not
+            // exist in the library and threw before render() was reached, so
+            // clicking a site appeared to do nothing.
+            document.querySelectorAll(".site-btn").forEach(function(btn) {{
+                btn.addEventListener("click", function() {{
+                    var resi = parseInt(btn.getAttribute("data-resi"), 10);
+                    viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
+                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }},
+                                    {{ cartoon: {{ color: '#ef4444' }}, stick: {{ color: '#ef4444' }} }});
+                    viewer.setStyle({{ resi: resi }},
+                                    {{ sphere: {{ color: '#facc15', radius: 1.2 }} }});
+                    viewer.zoomTo({{ resi: resi }});
+                    viewer.render();
+                }});
+            }});
             viewer.setBackgroundColor('#0b0f19');
         }});
     </script>
