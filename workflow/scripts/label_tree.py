@@ -80,10 +80,21 @@ def label_leaves(newick_str, tag="{Foreground}", target_taxa=None):
                     return f"{node_name}{tag}"
                 return match.group(0)
 
-            # Default: label if sequence ID contains h2h or spillover
+            # Default: tips are partitioned by the host the isolate came from.
+            # Human- and outbreak-derived isolates form the foreground; reservoir
+            # isolates form the reference. Both sets are labelled explicitly:
+            # RELAX is invoked with --reference Reference, and relying on HyPhy's
+            # undocumented "everything unlabelled" fallback made the reference set
+            # implicit and version-dependent.
+            #
+            # NOTE ON SCOPE: only tips carry a host, so only tips are labelled.
+            # The contrast therefore measures selection associated with the host
+            # an isolate was sampled from, not with a lineage's transmission mode.
             name_lower = node_name.lower()
             if "h2h" in name_lower or "spillover" in name_lower:
                 return f"{node_name}{tag}"
+            if "reservoir" in name_lower:
+                return f"{node_name}{{Reference}}"
 
         return match.group(0)
 
