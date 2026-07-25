@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import sys
 import json
 import urllib.request
 import urllib.parse
@@ -41,6 +42,25 @@ def protein_matches(target, product_val):
     target = target.lower().strip()
     product_val = product_val.lower().strip() if product_val else ""
     
+    # Mirrors the exclusion list in extract_cds.py: BV-BRC annotates VP35 as
+    # "polymerase complex protein" and the edited filovirus products as
+    # "small secreted glycoprotein GP" / "super small secreted glycoprotein GP",
+    # all of which match the naive keyword tests below.
+    exclusions = {
+        "gngc":      ["polymerase", "nucleoprotein", "nucleocapsid", "cofactor"],
+        "l_protein": ["cofactor", "complex protein", "vp35", "vp30", "vp24",
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+        "l":         ["cofactor", "complex protein", "vp35", "vp30", "vp24",
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+        "g_protein": ["polymerase", "fusion", "nucleoprotein", "phosphoprotein"],
+        "f_protein": ["polymerase", "nucleoprotein", "phosphoprotein"],
+        "gp":        ["secreted", "sgp", "ssgp", "soluble", "delta peptide",
+                      "polymerase", "nucleoprotein", "cofactor"],
+    }
+    for bad in exclusions.get(target, []):
+        if bad in product_val:
+            return False
+
     if target == "gngc":
         return any(x in product_val for x in ["glycoprotein", "gpc", "gn", "gc"]) or "m segment" in product_val
     elif target in ["l_protein", "l"]:
@@ -50,7 +70,7 @@ def protein_matches(target, product_val):
     elif target == "f_protein":
         return any(x in product_val for x in ["fusion", "f protein", "f-protein"])
     elif target == "gp":
-        if "polymerase" in product_val or product_val == "l":
+        if product_val == "l":
             return False
         return any(x in product_val for x in ["glycoprotein", "gp"])
     else:
@@ -173,14 +193,19 @@ def fetch_features(genome_ids, protein_target, min_len):
     passed_nuc = []
     passed_prot = []
     
-    # Process in batches of 100 genomes
-    batch_size = 100
+    # Process in batches of genomes. The batch must stay small enough that all of
+    # its CDS features fit inside one response: BV-BRC silently truncates to 25
+    # records when no limit() is given, so a batch of 100 genomes returned at most
+    # 25 CDS and the rest were never seen. A viral genome carries fewer than ~15
+    # CDS, so 50 genomes per batch stays far inside the explicit limit below.
+    batch_size = 50
+    page_limit = 25000
     for i in range(0, len(genome_ids), batch_size):
         batch = genome_ids[i:i+batch_size]
         # In RQL, genome_id list should NOT contain quotes, e.g. in(genome_id,(186538.100,186538.1000))
         genomes_str = ",".join(batch)
-        
-        rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)"
+
+        rql = f"in(genome_id,({genomes_str}))&eq(feature_type,CDS)&limit({page_limit})"
         
         # Fetch DNA and Protein FASTA in parallel/sequence
         dna_fasta = bvbrc_get("genome_feature", rql, accept_header="application/dna+fasta")
@@ -197,6 +222,14 @@ def fetch_features(genome_ids, protein_target, min_len):
         
         dna_records = parse_fasta(dna_fasta)
         prot_records = parse_fasta(prot_fasta)
+
+        # Guard against silent truncation: if a response comes back exactly at the
+        # limit, records were almost certainly dropped and the batch must shrink.
+        if len(dna_records) >= page_limit:
+            print(f"ERROR: BV-BRC returned {len(dna_records)} CDS for a batch of "
+                  f"{len(batch)} genomes, which is the requested limit. Results "
+                  f"are truncated; reduce batch_size.", file=sys.stderr)
+            sys.exit(1)
         
         # Match by feature ID
         common_ids = set(dna_records.keys()) & set(prot_records.keys())

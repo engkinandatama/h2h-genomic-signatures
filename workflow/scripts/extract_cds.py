@@ -4,6 +4,7 @@ import json
 import random
 import os
 import re
+import sys
 
 CODON_TABLE = {
     'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
@@ -41,6 +42,10 @@ def parse_args():
     parser.add_argument("--host", default="", help="Host filter (e.g. 'Homo sapiens' or 'Pteropus')")
     parser.add_argument("--max", type=int, default=100, help="Maximum number of sequences to keep")
     parser.add_argument("--min-len", type=int, default=1500, help="Minimum sequence length (bp) to avoid partial fragments")
+    parser.add_argument("--min-len-fraction", type=float, default=0.70,
+                        dest="min_len_fraction",
+                        help="Minimum CDS length as a fraction of the 90th-percentile "
+                             "candidate length for this protein; 0 disables the gate")
     parser.add_argument("--out-nuc", required=True, help="Output FASTA file for CDS nucleotides")
     parser.add_argument("--out-prot", required=True, help="Output FASTA file for protein translation")
     return parser.parse_args()
@@ -77,6 +82,27 @@ def protein_matches(target, gene_val, protein_val):
     gene_val = gene_val.lower().strip() if gene_val else ""
     protein_val = protein_val.lower().strip() if protein_val else ""
     
+    # Annotations that carry the target's keywords but name a different gene.
+    # Without these, "polymerase cofactor" (VP35) is collected as L, and the
+    # "small secreted glycoprotein" (sGP) and "super small secreted glycoprotein"
+    # (ssGP) products of filovirus transcriptional editing are collected as GP.
+    # sGP and ssGP share only the N-terminal ~295 codons with GP before shifting
+    # frame, so mixing them destroys the codon alignment.
+    exclusions = {
+        "gngc":      ["polymerase", "nucleoprotein", "nucleocapsid", "cofactor"],
+        "l_protein": ["cofactor", "complex protein", "vp35", "vp30", "vp24",
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+        "l":         ["cofactor", "complex protein", "vp35", "vp30", "vp24",
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+        "g_protein": ["polymerase", "fusion", "nucleoprotein", "phosphoprotein"],
+        "f_protein": ["polymerase", "nucleoprotein", "phosphoprotein"],
+        "gp":        ["secreted", "sgp", "ssgp", "soluble", "delta peptide",
+                      "polymerase", "nucleoprotein", "cofactor"],
+    }
+    for bad in exclusions.get(target, []):
+        if bad in protein_val or bad in gene_val:
+            return False
+
     if target == "gngc":
         # Hantavirus GnGc (Glycoprotein precursor / M segment glycoprotein)
         return any(x in protein_val for x in ["glycoprotein", "gpc", "gn", "gc"]) or any(x in gene_val for x in ["m", "gpc", "gn", "gc"])
@@ -90,8 +116,8 @@ def protein_matches(target, gene_val, protein_val):
         # Nipah F protein (Fusion glycoprotein)
         return any(x in protein_val for x in ["fusion", "f protein", "f-protein"]) or gene_val == "f"
     elif target == "gp":
-        # Ebola GP (Glycoprotein) - exclude L protein polymerases
-        if "polymerase" in protein_val or gene_val == "l":
+        # Filovirus GP (full-length envelope glycoprotein only)
+        if gene_val == "l":
             return False
         return any(x in protein_val for x in ["glycoprotein", "gp"]) or gene_val == "gp"
     else:
@@ -264,10 +290,53 @@ def main():
                 write_empty_outputs(args)
                 return
 
+            # Relative length gate. A flat --min-len cannot distinguish a 265 bp
+            # surveillance fragment from a 2031 bp full-length CDS, so partial
+            # sequences reach the alignment and reduce per-site occupancy to a few
+            # percent, which is what happened to the Puumala L alignment. The
+            # reference is the 90th percentile of candidate lengths rather than the
+            # maximum, so one over-long mis-annotation cannot raise the bar for all.
+            if args.min_len_fraction > 0 and len(passed_nucleotides) >= 5:
+                lengths = sorted(len(s) for _, s in passed_nucleotides)
+                p90 = lengths[int(0.9 * (len(lengths) - 1))]
+                floor = int(args.min_len_fraction * p90)
+                keep = [i for i, (_, s) in enumerate(passed_nucleotides)
+                        if len(s) >= floor]
+                dropped_partial = len(passed_nucleotides) - len(keep)
+                if dropped_partial:
+                    print(f"[{args.protein}] Relative length gate: reference "
+                          f"(p90) = {p90} bp, floor = {floor} bp, "
+                          f"dropped {dropped_partial} partial sequences.")
+                passed_nucleotides = [passed_nucleotides[i] for i in keep]
+                passed_proteins = [passed_proteins[i] for i in keep]
+                if not passed_nucleotides:
+                    print(f"[{args.protein}] WARNING: every sequence fell below the "
+                          f"relative length gate.", file=sys.stderr)
+                    write_empty_outputs(args)
+                    return
+
+            # Deduplicate BEFORE applying the cap. A single genome contributes one
+            # record per annotated product, and the same isolate is often deposited
+            # more than once, so capping first spends the quota on duplicates that
+            # the downstream merge then removes. In the 2026-05-24 run this reduced
+            # the Ebola non-human group from 105 candidates to 8 sequences.
+            seen_seq = set()
+            dedup_nuc, dedup_prot = [], []
+            for (nid, nseq), (pid, pseq) in zip(passed_nucleotides, passed_proteins):
+                if nseq in seen_seq:
+                    continue
+                seen_seq.add(nseq)
+                dedup_nuc.append((nid, nseq))
+                dedup_prot.append((pid, pseq))
+            n_dupes = len(passed_nucleotides) - len(dedup_nuc)
+            if n_dupes:
+                print(f"[{args.protein}] Removed {n_dupes} duplicate sequences before capping.")
+            passed_nucleotides, passed_proteins = dedup_nuc, dedup_prot
+
             # Downsample jika jumlah melebihi --max
             if len(passed_nucleotides) > args.max:
                 random.seed(42)
-                indices = random.sample(range(len(passed_nucleotides)), args.max)
+                indices = sorted(random.sample(range(len(passed_nucleotides)), args.max))
                 passed_nucleotides = [passed_nucleotides[i] for i in indices]
                 passed_proteins = [passed_proteins[i] for i in indices]
                 print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens sesuai batas maksimal.")
