@@ -7,8 +7,32 @@ outdir: "results"
 # Threshold maksimal jumlah sekuens per grup
 max_sequences_per_group: 100
 
-# Minimum panjang CDS (dalam base pairs) agar tidak memasukkan sekuens parsial (PCR fragments)
+# Optional third sequence source, keyed by taxon_id. GISAID has no open bulk API,
+# so these files are downloaded by hand from the EpiNiV/EpiPox/etc. search page
+# (tick "compl CDS" and "high cov.") and their paths recorded here. Records are
+# deduplicated against GenBank and BV-BRC by exact nucleotide match, so anything
+# already in the public archives contributes nothing.
+#
+# NOTE ON REDISTRIBUTION: the GISAID Database Access Agreement forbids
+# redistributing sequences. Alignments containing GISAID records must NOT be
+# deposited; publish the EPI_ISL accession list and the originating/submitting
+# laboratory acknowledgements instead.
+gisaid_sources:
+  "3052225":   # Henipavirus nipahense
+    fasta: ".dev/gisaid_epiniv/gisaid_niv_2026_07_25_11.fasta"
+    metadata: ".dev/gisaid_epiniv/gisaid_niv_merged_metadata.tsv"
+
+# Minimum CDS length in bp. Absolute floor only; it is the first of two length
+# gates, the second being min_cds_length_fraction below.
 min_length_cds: 200
+
+# Relative length gate, applied per protein after the absolute floor: a CDS is
+# kept only if it is at least this fraction of the 90th-percentile candidate
+# length for that protein. The absolute floor alone cannot separate a 265 bp
+# surveillance fragment from a 2031 bp full-length CDS, which is how partial
+# sequences reached the alignments and drove median per-site occupancy in the
+# Puumala L alignment down to about 4%. Set to 0 to disable.
+min_cds_length_fraction: 0.70
 
 viruses:
   # ==========================================
@@ -34,14 +58,14 @@ viruses:
     category: "Spillover"
     taxon_id: "3052499"  # Orthohantavirus sinnombreense (updated from old ID 11604)
     host_filter: "Homo sapiens"
-    uniprot_id: "P33453"
+    uniprot_id: "Q89905"   # SNV GnGc; per-protein IDs live in virus_groups
     proteins: ["GnGc", "L_protein"]
   Sin_Nombre_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
     taxon_id: "3052499"  # Orthohantavirus sinnombreense (updated from old ID 11604)
     host_filter: "Peromyscus" # Rodent reservoir
-    uniprot_id: "P33453"
+    uniprot_id: "Q89905"   # SNV GnGc; per-protein IDs live in virus_groups
     proteins: ["GnGc", "L_protein"]
 
   Puumala_virus_Spillover:
@@ -49,33 +73,44 @@ viruses:
     category: "Spillover"
     taxon_id: "3052493"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Homo sapiens"
-    uniprot_id: "P27313"
+    uniprot_id: "P27312"   # PUUV GnGc; per-protein IDs live in virus_groups
     proteins: ["GnGc", "L_protein"]
   Puumala_Reservoir:
     family: "Hantaviridae"
     category: "Reservoir"
     taxon_id: "3052493"  # Puumala orthohantavirus (updated from old ID 11606)
     host_filter: "Myodes|Clethrionomys" # Expanded rodent reservoir
-    uniprot_id: "P27313"
+    uniprot_id: "P27312"   # PUUV GnGc; per-protein IDs live in virus_groups
     proteins: ["GnGc", "L_protein"]
 
   # ==========================================
   # 2. Paramyxovirus Family
   # ==========================================
-  Nipah_Bangladesh_H2H:
+  # Bangladesh and India carry the same NiV-B clade and the same transmission
+  # phenotype: both have documented person-to-person chains, and both draw on the
+  # same Pteropus medius reservoir. India contributes only 6-8 unique sequences,
+  # too few to support its own branch contrast, so the two are analysed as one
+  # NiV-B human clade. Whether the site list depends on the Indian isolates is
+  # answered by a sensitivity run that excludes them, not by splitting the group.
+  Nipah_NiVB_H2H:
     family: "Paramyxoviridae"
     category: "H2H"
     taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
-    geo_filter: "Bangladesh"
+    geo_filter: "Bangladesh|India"
     host_filter: "Homo sapiens"
     uniprot_id: "Q9IH62"
     proteins: ["G_protein", "F_protein", "L_protein"]
+  # The 1998-99 Malaysian outbreak ran bat -> pig -> human, so swine and human
+  # isolates are the same epidemiological event and the same viral lineage.
+  # Human isolates alone number only 2-4 per protein, which is unanalysable;
+  # including the amplifying host raises the outbreak clade to 6-11 and describes
+  # the transmission chain more honestly than a human-only subset would.
   Nipah_Malaysia_Spillover:
     family: "Paramyxoviridae"
     category: "Spillover"
     taxon_id: "3052225"  # Henipavirus nipahense (updated from old ID 12058)
     geo_filter: "Malaysia"
-    host_filter: "Homo sapiens"
+    host_filter: "Homo sapiens|Sus scrofa"
     uniprot_id: "Q9IH62"
     proteins: ["G_protein", "F_protein", "L_protein"]
   Nipah_Reservoir:
@@ -96,13 +131,51 @@ viruses:
     host_filter: "Homo sapiens"
     uniprot_id: "Q05320"
     proteins: ["GP", "L_protein"]
-  Ebola_Zaire_Reservoir:
+  # Sudan ebolavirus is a second, independently emerged H2H-capable filovirus, added
+  # as a replication of the Ebola Zaire positive control rather than as a new contrast:
+  # 137 human records of which 149 are complete genomes, and no non-human host data,
+  # so like EBOV it is analysed with site-level models only. Two independent H2H
+  # filovirus lineages test whether an apparent H2H signature reproduces at all.
+  Sudan_ebolavirus_H2H:
+    family: "Filoviridae"
+    category: "H2H"
+    taxon_id: "186540"           # Sudan ebolavirus
+    host_filter: "Homo sapiens"
+    uniprot_id: "Q7T9D9"
+    proteins: ["GP", "L_protein"]
+
+  # Marburg supplies the reservoir contrast that Ebola structurally cannot: Rousettus
+  # aegyptiacus is the confirmed natural reservoir, with 20 complete genomes spanning
+  # 2007-2018 across Uganda, South Africa and Sierra Leone, against 75 complete human
+  # genomes spanning 1987-2024 across five countries. Both clades clear the >=10
+  # sequence threshold. MARV is spillover-dominant (documented human-to-human chains
+  # are limited and nosocomial), so it plays the same comparator role for EBOV that
+  # Sin Nombre and Puumala play for Andes.
+  # min_length_cds must exclude the ~100 short surveillance fragments in the bat set.
+  Marburg_Reservoir:
     family: "Filoviridae"
     category: "Reservoir"
-    taxon_id: "186538"
-    host_filter: "Macaca|Gorilla|Pan troglodytes|bat|Bat" # Non-human hosts including primates
-    uniprot_id: "Q05320"
+    taxon_id: "3052505"          # Marburg marburgvirus (BV-BRC current taxon)
+    host_filter: "Rousettus"     # confirmed natural reservoir
+    uniprot_id: "P35253"
     proteins: ["GP", "L_protein"]
+  Marburg_Spillover:
+    family: "Filoviridae"
+    category: "Spillover"
+    taxon_id: "3052505"
+    host_filter: "Homo sapiens"
+    uniprot_id: "P35253"
+    proteins: ["GP", "L_protein"]
+
+  # Ebola_Zaire_Reservoir was removed deliberately. No usable reservoir group exists
+  # in public sequence data: NCBI holds only 7 Chiroptera records for taxon 186538
+  # (short surveillance fragments), while the 157 non-human primate records are all
+  # from experimental challenge studies (isolate names carry inoculum doses such as
+  # 10ffu/100ffu/1000ffu), which measure within-host variation from a single
+  # inoculum rather than reservoir evolution. Gorilla and chimpanzee are dead-end
+  # hosts, as humans are. EBOV is therefore analysed as a positive control for
+  # H2H-capable evolution using site-level models only, with no branch-contrast
+  # test, which is the role stated in the manuscript introduction.
 
 virus_groups:
   Andes_virus:
@@ -129,8 +202,8 @@ virus_groups:
     uniprot_ids:
       GnGc: "P27312"      # Puumala virus envelopment polyprotein (Gn+Gc)
       L_protein: "P0C760"  # Puumala virus RNA-directed RNA polymerase L
-  Nipah_Bangladesh:
-    viruses: ["Nipah_Bangladesh_H2H", "Nipah_Reservoir"]
+  Nipah_NiVB:
+    viruses: ["Nipah_NiVB_H2H", "Nipah_Reservoir"]
     proteins: ["G_protein", "F_protein", "L_protein"]
     family: "Paramyxoviridae"
     uniprot_id: "Q9IH62"  # fallback (G protein)
@@ -148,24 +221,61 @@ virus_groups:
       F_protein: "Q9IH63"  # Nipah virus fusion glycoprotein F
       L_protein: "Q997F0"  # Nipah virus RNA-directed RNA polymerase L
   Ebola_Zaire:
-    viruses: ["Ebola_Zaire_H2H", "Ebola_Zaire_Reservoir"]
+    viruses: ["Ebola_Zaire_H2H"]   # positive control; no reservoir group available
     proteins: ["GP", "L_protein"]
     family: "Filoviridae"
     uniprot_id: "Q05320"  # fallback (GP)
     uniprot_ids:
       GP: "Q05320"         # Envelope glycoprotein (Mayinga-76 strain)
       L_protein: "Q05318" # RNA-directed RNA polymerase L (Mayinga-76 strain)
+  Sudan_ebolavirus:
+    viruses: ["Sudan_ebolavirus_H2H"]   # second positive control; no reservoir data
+    proteins: ["GP", "L_protein"]
+    family: "Filoviridae"
+    uniprot_id: "Q7T9D9"           # fallback (GP)
+    uniprot_ids:
+      GP: "Q7T9D9"                 # Envelope glycoprotein (Gulu strain, 676 aa)
+      L_protein: "Q5XX01"          # RNA-directed RNA polymerase L (Gulu, 2210 aa)
+  Marburg_virus:
+    viruses: ["Marburg_Spillover", "Marburg_Reservoir"]
+    proteins: ["GP", "L_protein"]
+    family: "Filoviridae"
+    uniprot_id: "P35253"           # fallback (GP)
+    uniprot_ids:
+      GP: "P35253"                 # Envelope glycoprotein (Musoke strain, 681 aa)
+      L_protein: "P31352"          # RNA-directed RNA polymerase L (Musoke, 2331 aa)
 
 params:
   mafft: "--auto --maxiterate 1000"
-  bootstrap_threshold: 70     # Collapse internal branches with bootstrap < 70 before selection analyses
+  # Bootstrap support below this value has its LABEL removed from the Newick
+  # string. This does NOT collapse the branch: topology and branch lengths are
+  # unchanged, and HyPhy does not read support values at all, so the setting has
+  # no effect on any selection result. It is retained only so the labelled tree
+  # matches the unlabelled one structurally. Do not describe it as a filter.
+  bootstrap_threshold: 70
   iqtree: "-m TEST -B 1000"
   hyphy:
     pvalue_threshold: 0.05       # Threshold p-value untuk MEME dan FEL
     fubar_pp_threshold: 0.90     # Posterior probability threshold untuk FUBAR (rekomendasi > 0.90)
-    min_methods: 1               # Diubah ke 1 agar menangkap situs seleksi episodik (MEME) yang sangat penting untuk adaptasi host
+    # Number of site-level methods (MEME, FEL with direction, FUBAR, SLAC) that
+    # must agree before a site is called consensus. This now governs both
+    # consensus_pos and consensus_neg. It was 1, which meant a single MEME hit
+    # produced a "consensus" site while the manuscript stated 2.
+    min_methods: 2
     contrast_fel_fdr: 0.20       # FDR threshold untuk Contrast-FEL (lebih liberal karena test dua arah)
-    methods: ["MEME", "FEL", "FUBAR", "SLAC", "Contrast-FEL", "PRIME", "BUSTED", "aBSREL", "RELAX"]
+
+  # Cross-family convergence analysis (rule analyze_convergence)
+  convergence_permutations: 20000   # null model draws for bin co-occurrence
+  breakpoint_margin_codons: 10      # a site this close to a GARD breakpoint is flagged
+
+  # GISAID ORF extraction (rule fetch_gisaid). An ORF is accepted as the target
+  # gene when its k-mer similarity to the UniProt reference clears min_identity
+  # and its length sits inside the fraction bounds.
+  gisaid:
+    min_identity: 0.35
+    min_length_fraction: 0.80
+    max_length_fraction: 1.20
+    max_ambiguous_fraction: 0.02
 
 # Alokasi resource per task (Otomatis menyesuaikan dengan snakemake -c 64)
 resources:
@@ -197,7 +307,34 @@ resources:
   #   iqtree_jobs=2 dan hyphy_jobs=4  → 2×16 + 4×8 = 32+32 = 64 threads max
   #
   # Rekomendasi perintah final:
-  #   snakemake --cores 64 --resources ncbi_api=5 hyphy_jobs=4 iqtree_jobs=2 --use-conda --rerun-incomplete
+  #   snakemake --cores 64 --resources hyphy_jobs=4 iqtree_jobs=2 --use-conda --rerun-incomplete
   #
-  hyphy_jobs: 4
-  iqtree_jobs: 2
+  # The hyphy_jobs / iqtree_jobs numbers above are the TOTAL token budget and can
+  # only be supplied on the command line; Snakemake does not read resource
+  # availability from the config file. Two keys used to sit here holding 4 and 2,
+  # which read as settings but changed nothing. They were removed so the command
+  # line stays the single place where concurrency is set.
+
+# Domain boundaries used for the enrichment test. These are approximate and were
+# chosen as round numbers rather than from a per-virus structural annotation, so
+# the enrichment result is sensitive to where a boundary is placed. Any reported
+# odds ratio should be checked against a shifted boundary before being claimed.
+protein_domains:
+  gngc:
+    Gn_domain: [1, 400]
+    Gc_domain: [401, 650]
+    Tail_domain: [651, 1000]
+  l_protein:
+    N_terminal: [1, 599]
+    RdRp_catalytic: [600, 1200]
+    C_terminal: [1201, 2500]
+  g_protein:
+    Stalk_domain: [1, 299]
+    RBD_domain: [300, 600]
+  f_protein:
+    Fusion_peptide: [100, 150]
+    HR1_domain: [151, 250]
+    HR2_domain: [450, 500]
+  gp:
+    RBD_domain: [50, 150]
+    Mucin_like_domain: [300, 500]
