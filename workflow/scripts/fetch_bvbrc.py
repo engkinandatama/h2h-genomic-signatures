@@ -278,6 +278,10 @@ def main():
     parser.add_argument("--host", default="")
     parser.add_argument("--max", type=int, default=100)
     parser.add_argument("--min-len", type=int, default=1500)
+    parser.add_argument("--min-len-fraction", type=float, default=0.70,
+                        dest="min_len_fraction",
+                        help="Minimum CDS length as a fraction of the 90th-percentile "
+                             "candidate length for this protein; 0 disables the gate")
     parser.add_argument("--out-nuc", required=True)
     parser.add_argument("--out-prot", required=True)
     args = parser.parse_args()
@@ -292,13 +296,28 @@ def main():
     passed_nuc, passed_prot = fetch_features(valid_genome_ids, args.protein, args.min_len)
     print(f"[{args.protein}] Berhasil mengekstrak {len(passed_nuc)} CDS valid dari BV-BRC.", flush=True)
     
+    # Relative length gate, mirroring extract_cds.py. BV-BRC carries the same
+    # partial surveillance fragments as GenBank, and an absolute floor cannot tell
+    # a 265 bp fragment from a full-length CDS.
+    if args.min_len_fraction > 0 and len(passed_nuc) >= 5:
+        lengths = sorted(len(s) for _, s in passed_nuc)
+        p90 = lengths[int(0.9 * (len(lengths) - 1))]
+        floor = int(args.min_len_fraction * p90)
+        keep = [i for i, (_, s) in enumerate(passed_nuc) if len(s) >= floor]
+        dropped = len(passed_nuc) - len(keep)
+        if dropped:
+            print(f"[{args.protein}] Relative length gate: reference (p90) = {p90} bp, "
+                  f"floor = {floor} bp, dropped {dropped} partial sequences.", flush=True)
+        passed_nuc = [passed_nuc[i] for i in keep]
+        passed_prot = [passed_prot[i] for i in keep]
+
     if not passed_nuc:
         write_empty_outputs(args.out_nuc, args.out_prot)
         return
         
     if len(passed_nuc) > args.max:
         random.seed(42)
-        indices = random.sample(range(len(passed_nuc)), args.max)
+        indices = sorted(random.sample(range(len(passed_nuc)), args.max))
         passed_nuc = [passed_nuc[i] for i in indices]
         passed_prot = [passed_prot[i] for i in indices]
         print(f"[{args.protein}] Downsampled menjadi {args.max} sekuens.", flush=True)
