@@ -3,9 +3,14 @@ channels:
   - conda-forge
   - bioconda
   - defaults
+# Versions are pinned so a rerun reproduces the same tool behaviour. The
+# 2026-05-24 run did not record its versions, so these are the versions
+# verified against bioconda at the time of the rebuild. After the first
+# successful build, export a lock file to freeze the full solve:
+#   conda list --explicit > workflow/envs/<name>.lock
 dependencies:
-  - python >=3.9
-  - biopython
-  - py3dmol
-  - requests
-  - pandas
+  - python >=3.9,<3.13
+  - biopython >=1.81
+  - py3dmol >=2.0
+  - requests >=2.31
+  - pandas >=2.0,<3

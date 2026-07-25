@@ -11,6 +11,24 @@ conda create -n snakemake -c conda-forge -c bioconda snakemake
 conda activate snakemake
 ```
 
+### Kunci API NCBI
+
+`rule download_genomes` membaca `NCBI_API_KEY` dari environment, bukan dari file
+`.env`. Tanpa kunci ini rate limit NCBI turun dari 10 ke 3 request per detik dan
+unduhan bisa gagal pada dataset besar:
+
+```bash
+export NCBI_API_KEY="<kunci-anda>"
+```
+
+### Sumber data GISAID (opsional)
+
+GISAID tidak punya API bulk terbuka. Unduh manual dari antarmuka web dengan opsi
+**compl CDS** dan **high cov.** dicentang, lalu catat path FASTA dan metadata di
+`gisaid_sources` pada `config/config.yaml`. Sekuens GISAID **tidak boleh**
+diredistribusikan; bagikan daftar accession `EPI_ISL_...` beserta acknowledgement
+laboratorium, bukan alignment-nya.
+
 ## 2. Konfigurasi (Config)
 Semua parameter dieksekusi berdasarkan satu file: `config/config.yaml`.
 Sebelum menjalankan pipeline, pastikan Anda:
@@ -24,7 +42,7 @@ Sebelum menjalankan pipeline, pastikan Anda:
 Gunakan mode ini jika Anda menjalankan pipeline di laptop, PC, atau telah mem- *booking* satu node penuh di HPC.
 
 ```bash
-snakemake --use-conda -c 64
+snakemake --use-conda -c 64 --resources hyphy_jobs=4 iqtree_jobs=2
 ```
 **Penjelasan:**
 *   `--use-conda`: Memerintahkan Snakemake untuk otomatis membuat *environment* independen per- *rule* (misal: env khusus HyPhy, env khusus IQ-TREE) di *background*.
@@ -53,5 +71,18 @@ snakemake --use-conda --executor slurm --jobs 100
 
 ## 5. Output & Benchmarking
 Seluruh hasil akan otomatis masuk ke folder `results/<project_name>/`.
-Jika ada *error*, cek terminal atau buka file `.log` di dalam folder `logs/<project_name>/`.
-Untuk melihat penggunaan RAM atau Waktu asli setiap program, periksa `.tsv` di dalam folder `benchmarks/<project_name>/`.
+Jika ada *error*, buka file `.log` di dalam `results/<project_name>/logs/`.
+Untuk penggunaan RAM dan waktu tiap program, periksa `.tsv` di `results/<project_name>/benchmarks/`.
+
+### Menandai kegagalan yang tidak menghentikan pipeline
+
+Beberapa rule menulis sentinel `{"status": "FAILED"}` ketika tool-nya gagal, agar
+DAG tetap berjalan tanpa menyamarkan kegagalan sebagai hasil negatif. Setelah run
+selesai, periksa:
+
+```bash
+grep -l '"status": "FAILED"' results/<project_name>/04_selection/*/*.json
+awk 'FNR==2 && $3!="OK"' results/<project_name>/04_selection/*/*_gard_summary.txt
+```
+
+Keluaran kosong berarti tidak ada tahap yang gagal diam-diam.

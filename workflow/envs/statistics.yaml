@@ -3,10 +3,16 @@ channels:
   - conda-forge
   - bioconda
   - defaults
+# Versions are pinned so a rerun reproduces the same tool behaviour. The
+# 2026-05-24 run did not record its versions, so these are the versions
+# verified against bioconda at the time of the rebuild. After the first
+# successful build, export a lock file to freeze the full solve:
+#   conda list --explicit > workflow/envs/<name>.lock
 dependencies:
-  - python >=3.9
-  - pandas
-  - scipy
-  - statsmodels
-  - matplotlib
-  - seaborn
+  - python >=3.9,<3.13
+  - pandas >=2.0,<3
+  - scipy >=1.11
+  - statsmodels >=0.14
+  - matplotlib >=3.7
+  - seaborn >=0.13
+  - pyyaml >=6.0

@@ -3,8 +3,13 @@ channels:
   - conda-forge
   - bioconda
   - defaults
+# Versions are pinned so a rerun reproduces the same tool behaviour. The
+# 2026-05-24 run did not record its versions, so these are the versions
+# verified against bioconda at the time of the rebuild. After the first
+# successful build, export a lock file to freeze the full solve:
+#   conda list --explicit > workflow/envs/<name>.lock
 dependencies:
-  - ncbi-datasets-cli >=15.0
-  - seqkit >=2.0
-  - python >=3.9
-  - pandas
+  - ncbi-datasets-cli >=16.0
+  - seqkit =2.13.0
+  - python >=3.9,<3.13
+  - pandas >=2.0,<3
