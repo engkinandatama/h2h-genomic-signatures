@@ -289,3 +289,104 @@ Untuk melihat alasan sebuah job akan dijalankan:
 ```bash
 snakemake -n -r -s workflow/Snakefile --until <nama_rule> | head -40
 ```
+
+---
+
+## 11. Melanjutkan run yang terputus
+
+Snakemake melacak output yang sudah jadi, jadi menjalankan ulang **tidak** memulai
+dari nol — yang sudah selesai dilewati. Tapi run yang mati mendadak (server
+restart, SIGKILL, koneksi putus) meninggalkan dua masalah yang harus dibereskan
+lebih dulu.
+
+### 11a. Lepas lock
+
+Snakemake mengunci direktori kerja selama berjalan. Kalau prosesnya mati tanpa
+sempat melepasnya, run berikutnya menolak start dengan pesan
+`Directory cannot be locked`.
+
+```bash
+cd /datadrive/drive_a/engkinandatama/h2h
+snakemake --unlock -s workflow/Snakefile
+```
+
+### 11b. Buang output yang terpotong
+
+Proses yang dibunuh di tengah penulisan bisa meninggalkan JSON separuh. File itu
+ada dan ukurannya wajar, jadi Snakemake menganggapnya selesai, tetapi parser akan
+gagal membacanya. Periksa dan hapus:
+
+```bash
+python3 - <<'PY'
+import json, glob, os
+R = "results/Zoonotic_Convergent_Signatures"
+bad = []
+for f in glob.glob(f"{R}/04_selection/*/*.json"):
+    try:
+        json.load(open(f))
+    except Exception:
+        bad.append(f)
+print(f"JSON tidak bisa diparse: {len(bad)}")
+for b in bad:
+    print("  ", b, os.path.getsize(b), "byte")
+    os.remove(b)
+print("Sudah dihapus; Snakemake akan menghitungnya ulang.")
+PY
+```
+
+Periksa juga alignment dan tree yang mungkin terpotong:
+
+```bash
+R=results/Zoonotic_Convergent_Signatures
+find $R/02_aligned $R/03_trees -type f -size -100c 2>/dev/null   # curigai yang kosong
+```
+
+### 11c. Lanjutkan
+
+```bash
+snakemake --use-conda --cores 64 \
+          --resources hyphy_jobs=4 iqtree_jobs=2 \
+          --rerun-incomplete --keep-going \
+          -s workflow/Snakefile \
+          2>&1 | tee -a run_resume_$(date +%Y%m%d_%H%M).log
+```
+
+`--rerun-incomplete` mengulang job yang ditandai Snakemake sebagai belum tuntas.
+Cek dulu berapa yang tersisa sebelum menjalankan:
+
+```bash
+snakemake -n -s workflow/Snakefile | tail -5
+```
+
+---
+
+## 12. Supaya tidak terputus lagi
+
+Sesi interaktif mati bersama koneksi SSH dan bersama server. Pakai salah satu:
+
+**tmux** — paling sederhana, bisa dilepas lalu disambung lagi:
+
+```bash
+tmux new -s h2h
+# jalankan snakemake di dalamnya, lalu lepas dengan Ctrl-b lalu d
+# menyambung kembali:
+tmux attach -t h2h
+```
+
+**nohup** — tetap jalan setelah logout, tapi tidak bisa dilihat langsung:
+
+```bash
+nohup snakemake --use-conda --cores 64 \
+      --resources hyphy_jobs=4 iqtree_jobs=2 \
+      --rerun-incomplete --keep-going -s workflow/Snakefile \
+      > run_$(date +%Y%m%d_%H%M).log 2>&1 &
+echo $! > snakemake.pid
+```
+
+Pantau dengan `bash scripts/progress.sh` atau `tail -f run_*.log`.
+
+**sbatch** — kalau ada SLURM, ini yang paling tahan restart karena scheduler akan
+menjadwalkan ulang. Lihat langkah 6.
+
+Apa pun pilihannya, pastikan `NCBI_API_KEY` ikut terbawa. Untuk nohup dan tmux,
+`export` di shell yang sama sudah cukup; untuk sbatch, tulis di dalam skripnya.
