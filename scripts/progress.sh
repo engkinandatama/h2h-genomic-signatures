@@ -21,8 +21,13 @@ read -r N_DATASETS N_VIRUSES < <(python3 - <<'PY'
 import yaml
 c = yaml.safe_load(open("config/config.yaml"))
 d = sum(len(s["proteins"]) for s in c["virus_groups"].values())
-v = sum(len(c["viruses"][x]["proteins"]) for g in c["virus_groups"].values()
-        for x in g["viruses"] if x in c["viruses"])
+# A virus can belong to more than one group (Nipah_Reservoir serves both the
+# NiV-B and the Malaysia contrast), so count unique virus/protein pairs rather
+# than summing per group, which double-counted the shared reservoir.
+pairs = {(x, p) for g in c["virus_groups"].values()
+         for x in g["viruses"] if x in c["viruses"]
+         for p in c["viruses"][x]["proteins"]}
+v = len(pairs)
 print(d, v)
 PY
 )
