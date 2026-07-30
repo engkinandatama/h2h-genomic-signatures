@@ -264,6 +264,20 @@ params:
     min_methods: 2
     contrast_fel_fdr: 0.20       # FDR threshold untuk Contrast-FEL (lebih liberal karena test dua arah)
 
+  # GARD recombination screening. It is by far the most expensive step: the
+  # multi-breakpoint phase is a genetic algorithm whose cost grows sharply with
+  # alignment length and sequence count, and single datasets have taken 6+ hours.
+  # rate_classes is the main cost lever (HyPhy default 4); lowering it shrinks the
+  # model space GARD searches.
+  #
+  # skip_datasets lists "<virus_group>/<protein>" entries to leave unscreened when
+  # compute is the binding constraint. Skipped datasets are recorded with status
+  # SKIPPED, never as "no recombination detected", so a dataset that was never
+  # screened cannot be reported as clean. State the count in the Methods.
+  gard:
+    rate_classes: 4
+    skip_datasets: []
+
   # Cross-family convergence analysis (rule analyze_convergence)
   convergence_permutations: 20000   # null model draws for bin co-occurrence
   breakpoint_margin_codons: 10      # a site this close to a GARD breakpoint is flagged

@@ -69,6 +69,11 @@ def parse_gard(data):
 
     # Empty dict, missing file, or the {"status": "FAILED"} sentinel written by the
     # GARD rule when HyPhy exits non-zero.
+    if data and data.get("status") == "SKIPPED":
+        # Not screened because compute was the constraint. Distinct from FAILED so
+        # the Methods can say how many alignments were screened and how many were
+        # not, and distinct from a clean negative in either case.
+        return dict(failed, status="SKIPPED")
     if not data or data.get("status") == "FAILED":
         return failed
 
@@ -139,7 +144,10 @@ def main():
     # UnicodeEncodeError on emoji and would fail the rule.
     detected = result["recombination_detected"]
     print(f"\n=== GARD: {args.virus_group} / {args.protein} ===")
-    if result["status"] == "FAILED":
+    if result["status"] == "SKIPPED":
+        print("  [SKIPPED] Not screened (params.gard.skip_datasets).")
+        print("  Recombination status is UNKNOWN for this alignment.")
+    elif result["status"] == "FAILED":
         print("  [FAILED] GARD produced no usable output.")
         print("  Recombination status is UNKNOWN for this alignment. Do not report this")
         print("  as evidence that the no-recombination assumption holds.")

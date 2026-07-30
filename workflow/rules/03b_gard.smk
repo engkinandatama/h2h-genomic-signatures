@@ -27,6 +27,10 @@ rule hyphy_gard:
     resources:
         mem_mb=config.get("resources", {}).get("mem_mb", {}).get("hyphy", 8000),
         hyphy_jobs=1
+    params:
+        rate_classes=config.get("params", {}).get("gard", {}).get("rate_classes", 4),
+        skip=lambda w: f"{w.virus_group}/{w.protein}" in (
+            config.get("params", {}).get("gard", {}).get("skip_datasets", []) or [])
     conda:
         "../envs/selection.yaml"
     shell:
@@ -49,6 +53,13 @@ rule hyphy_gard:
             exit 0
         fi
 
+        if [ "{params.skip}" = "True" ]; then
+            echo "SKIPPED by config (params.gard.skip_datasets): recombination" >> {log}
+            echo "status is UNKNOWN for this alignment, not clean." >> {log}
+            echo '{{"status": "SKIPPED"}}' > {output.json}
+            exit 0
+        fi
+
         # ENV=TOLERATE_NUMERICAL_ERRORS must be a command-line argument; HyPhy does not
         # read it from the process environment. Writing --output-lf to /dev/null makes
         # HyPhy try to create '/dev/null.fit.bf', which fails, so use a real path.
@@ -56,6 +67,7 @@ rule hyphy_gard:
             --alignment {input.codon_aln} \
             --output {output.json} \
             --output-lf {output.json}.lf \
+            --rate-classes {params.rate_classes} \
             CPU={threads} \
             ENV=TOLERATE_NUMERICAL_ERRORS=1; >> {log} 2>&1 \
             || (echo '{{"status": "FAILED"}}' > {output.json} \
