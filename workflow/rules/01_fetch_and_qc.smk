@@ -51,7 +51,8 @@ rule filter_and_extract_cds_ncbi:
         host_filter=lambda wildcards: config["viruses"][wildcards.virus].get("host_filter", ""),
         max_seq=config["max_sequences_per_group"],
         min_len=config.get("min_length_cds", 1500),
-        min_len_fraction=config.get("min_cds_length_fraction", 0.70)
+        min_len_fraction=config.get("min_cds_length_fraction", 0.70),
+        max_len_fraction=config.get("max_cds_length_fraction", 1.30)
     conda:
         "../envs/download.yaml"
     shell:
@@ -65,6 +66,7 @@ rule filter_and_extract_cds_ncbi:
             --max {params.max_seq} \
             --min-len {params.min_len} \
             --min-len-fraction {params.min_len_fraction} \
+            --max-len-fraction {params.max_len_fraction} \
             --out-nuc {output.fasta} \
             --out-prot {output.faa} >> {log} 2>&1
         echo "Extraction and filtering complete." >> {log}
@@ -84,7 +86,8 @@ rule fetch_bvbrc:
         host_filter=lambda wildcards: config["viruses"][wildcards.virus].get("host_filter", ""),
         max_seq=config["max_sequences_per_group"],
         min_len=config.get("min_length_cds", 1500),
-        min_len_fraction=config.get("min_cds_length_fraction", 0.70)
+        min_len_fraction=config.get("min_cds_length_fraction", 0.70),
+        max_len_fraction=config.get("max_cds_length_fraction", 1.30)
     conda:
         "../envs/download.yaml"
     shell:
@@ -98,6 +101,7 @@ rule fetch_bvbrc:
             --max {params.max_seq} \
             --min-len {params.min_len} \
             --min-len-fraction {params.min_len_fraction} \
+            --max-len-fraction {params.max_len_fraction} \
             --out-nuc {output.fasta} \
             --out-prot {output.faa} >> {log} 2>&1
         echo "BV-BRC fetch complete." >> {log}

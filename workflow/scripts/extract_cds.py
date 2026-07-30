@@ -46,6 +46,10 @@ def parse_args():
                         dest="min_len_fraction",
                         help="Minimum CDS length as a fraction of the 90th-percentile "
                              "candidate length for this protein; 0 disables the gate")
+    parser.add_argument("--max-len-fraction", type=float, default=1.30,
+                        dest="max_len_fraction",
+                        help="Maximum CDS length as a fraction of the same reference; "
+                             "rejects a longer paralog that clears the floor from above")
     parser.add_argument("--out-nuc", required=True, help="Output FASTA file for CDS nucleotides")
     parser.add_argument("--out-prot", required=True, help="Output FASTA file for protein translation")
     return parser.parse_args()
@@ -300,18 +304,23 @@ def main():
                 lengths = sorted(len(s) for _, s in passed_nucleotides)
                 p90 = lengths[int(0.9 * (len(lengths) - 1))]
                 floor = int(args.min_len_fraction * p90)
+                # An upper bound is needed as well as a floor. Without it a 6636 bp
+                # L-protein CDS passes a GP dataset whose p90 is 2031 bp, because it
+                # clears the floor from above. Three such records reached the Sudan
+                # GP output before this check existed.
+                ceiling = int(args.max_len_fraction * p90)
                 keep = [i for i, (_, s) in enumerate(passed_nucleotides)
-                        if len(s) >= floor]
+                        if floor <= len(s) <= ceiling]
                 dropped_partial = len(passed_nucleotides) - len(keep)
                 if dropped_partial:
                     print(f"[{args.protein}] Relative length gate: reference "
-                          f"(p90) = {p90} bp, floor = {floor} bp, "
+                          f"(p90) = {p90} bp, floor = {floor} bp, ceiling = {ceiling} bp, "
                           f"dropped {dropped_partial} partial sequences.")
                 passed_nucleotides = [passed_nucleotides[i] for i in keep]
                 passed_proteins = [passed_proteins[i] for i in keep]
                 if not passed_nucleotides:
-                    print(f"[{args.protein}] WARNING: every sequence fell below the "
-                          f"relative length gate.", file=sys.stderr)
+                    print(f"[{args.protein}] WARNING: every sequence fell outside "
+                          f"the relative length gate.", file=sys.stderr)
                     write_empty_outputs(args)
                     return
 

@@ -86,7 +86,8 @@ def bvbrc_get(endpoint, params_str, accept_header="application/json", retries=3)
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            timeout = 90 if accept_header == "application/json" else 300
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read()
                 if accept_header == "application/json":
                     return json.loads(raw.decode("utf-8"))
@@ -190,15 +191,21 @@ def parse_fasta(fasta_text):
     return records
 
 def fetch_features(genome_ids, protein_target, min_len):
+    failed_batches = []
     passed_nuc = []
     passed_prot = []
     
-    # Process in batches of genomes. The batch must stay small enough that all of
-    # its CDS features fit inside one response: BV-BRC silently truncates to 25
-    # records when no limit() is given, so a batch of 100 genomes returned at most
-    # 25 CDS and the rest were never seen. A viral genome carries fewer than ~15
-    # CDS, so 50 genomes per batch stays far inside the explicit limit below.
-    batch_size = 50
+    # Process in batches of genomes. Two BV-BRC behaviours constrain the size:
+    #   * without limit() the API silently truncates to 25 records, so a batch of
+    #     100 genomes returned at most 25 CDS and the rest were never seen;
+    #   * the protein+fasta endpoint hangs beyond roughly 10-15 genomes per
+    #     request and returns TRUNCATED output rather than an error. Measured on
+    #     taxon 186540: 10 genomes -> 2.8 s and 180 sequences, 20 genomes ->
+    #     150 s and only 200 of 360, 39 genomes -> 150 s and 600 of 702.
+    # Protein sequences are therefore no longer requested at all; a CDS
+    # translation is exact, needs no network call, and cannot fall out of step
+    # with its nucleotide record.
+    batch_size = 25
     page_limit = 25000
     for i in range(0, len(genome_ids), batch_size):
         batch = genome_ids[i:i+batch_size]
@@ -209,19 +216,17 @@ def fetch_features(genome_ids, protein_target, min_len):
         
         # Fetch DNA and Protein FASTA in parallel/sequence
         dna_fasta = bvbrc_get("genome_feature", rql, accept_header="application/dna+fasta")
+
+        # A batch that fails must not discard the dataset. Aborting on the first
+        # failure lost all four filovirus datasets even though the batches before
+        # it had already succeeded. Skip it, count it, and carry on.
         if dna_fasta is None:
-            print("Error: Gagal mengambil data sekuens DNA dari BV-BRC API. Menghentikan pipeline.", flush=True)
-            import sys
-            sys.exit(1)
-            
-        prot_fasta = bvbrc_get("genome_feature", rql, accept_header="application/protein+fasta")
-        if prot_fasta is None:
-            print("Error: Gagal mengambil data sekuens Protein dari BV-BRC API. Menghentikan pipeline.", flush=True)
-            import sys
-            sys.exit(1)
+            failed_batches.append(len(batch))
+            print(f"WARNING: batch of {len(batch)} genomes could not be retrieved; "
+                  f"continuing without it.", file=sys.stderr, flush=True)
+            continue
         
         dna_records = parse_fasta(dna_fasta)
-        prot_records = parse_fasta(prot_fasta)
 
         # Guard against silent truncation: if a response comes back exactly at the
         # limit, records were almost certainly dropped and the batch must shrink.
@@ -231,12 +236,9 @@ def fetch_features(genome_ids, protein_target, min_len):
                   f"are truncated; reduce batch_size.", file=sys.stderr)
             sys.exit(1)
         
-        # Match by feature ID
-        common_ids = set(dna_records.keys()) & set(prot_records.keys())
-        
-        for fid in common_ids:
+        for fid in sorted(dna_records):
             na_seq, product = dna_records[fid]
-            aa_seq, _ = prot_records[fid]
+            aa_seq = translate_dna(na_seq)
             
             if not na_seq:
                 continue
@@ -262,6 +264,12 @@ def fetch_features(genome_ids, protein_target, min_len):
             
         time.sleep(0.5)
             
+    if failed_batches:
+        print(f"WARNING: {len(failed_batches)} of "
+              f"{(len(genome_ids) + batch_size - 1) // batch_size} batches were "
+              f"skipped after repeated API failures, covering "
+              f"{sum(failed_batches)} genomes. The BV-BRC contribution for this "
+              f"dataset is incomplete.", file=sys.stderr, flush=True)
     return passed_nuc, passed_prot
 
 def write_empty_outputs(out_nuc, out_prot):
@@ -278,10 +286,20 @@ def main():
     parser.add_argument("--host", default="")
     parser.add_argument("--max", type=int, default=100)
     parser.add_argument("--min-len", type=int, default=1500)
+    parser.add_argument("--genome-multiplier", type=int, default=5,
+                        dest="genome_multiplier",
+                        help="Query features for at most this many times --max "
+                             "genomes. Ebola matched 3060 genomes for a 100-sequence "
+                             "cap, so the pipeline issued ~30x the requests it "
+                             "needed and timed out on the FASTA endpoint.")
     parser.add_argument("--min-len-fraction", type=float, default=0.70,
                         dest="min_len_fraction",
                         help="Minimum CDS length as a fraction of the 90th-percentile "
                              "candidate length for this protein; 0 disables the gate")
+    parser.add_argument("--max-len-fraction", type=float, default=1.30,
+                        dest="max_len_fraction",
+                        help="Maximum CDS length as a fraction of the same reference; "
+                             "rejects a longer paralog that clears the floor from above")
     parser.add_argument("--out-nuc", required=True)
     parser.add_argument("--out-prot", required=True)
     args = parser.parse_args()
@@ -293,6 +311,18 @@ def main():
         write_empty_outputs(args.out_nuc, args.out_prot)
         return
         
+    # Cap the genome list before requesting features. Every genome costs two FASTA
+    # requests, and beyond a modest multiple of --max the extra genomes only feed
+    # sequences that the cap discards later. The sample is seeded, so the subset is
+    # reproducible across runs and machines.
+    cap = max(args.max * args.genome_multiplier, args.max)
+    if len(valid_genome_ids) > cap:
+        random.seed(42)
+        valid_genome_ids = sorted(random.sample(valid_genome_ids, cap))
+        print(f"[{args.protein}] Sampled {cap} of the matching genomes for feature "
+              f"retrieval (seeded); the cap is --max x --genome-multiplier.",
+              flush=True)
+
     passed_nuc, passed_prot = fetch_features(valid_genome_ids, args.protein, args.min_len)
     print(f"[{args.protein}] Berhasil mengekstrak {len(passed_nuc)} CDS valid dari BV-BRC.", flush=True)
     
@@ -303,7 +333,12 @@ def main():
         lengths = sorted(len(s) for _, s in passed_nuc)
         p90 = lengths[int(0.9 * (len(lengths) - 1))]
         floor = int(args.min_len_fraction * p90)
-        keep = [i for i, (_, s) in enumerate(passed_nuc) if len(s) >= floor]
+        # An upper bound is needed as well as a floor. Without it a 6636 bp
+        # L-protein CDS passes a GP dataset whose p90 is 2031 bp, because it
+        # clears the floor from above. Three such records reached the Sudan GP
+        # output before this check existed.
+        ceiling = int(args.max_len_fraction * p90)
+        keep = [i for i, (_, s) in enumerate(passed_nuc) if floor <= len(s) <= ceiling]
         dropped = len(passed_nuc) - len(keep)
         if dropped:
             print(f"[{args.protein}] Relative length gate: reference (p90) = {p90} bp, "

@@ -34,6 +34,11 @@ min_length_cds: 200
 # Puumala L alignment down to about 4%. Set to 0 to disable.
 min_cds_length_fraction: 0.70
 
+# Upper bound of the same gate. A floor alone cannot reject a longer paralog,
+# which clears it from above: three 6636 bp L-protein records passed into the
+# Sudan GP dataset whose reference length is 2031 bp.
+max_cds_length_fraction: 1.30
+
 viruses:
   # ==========================================
   # 1. Hantavirus Family
