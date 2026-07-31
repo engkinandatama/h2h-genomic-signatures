@@ -442,7 +442,7 @@ rule hyphy_contrast_fel:
             --branch-set Foreground \
             --output {output.json} \
             CPU={threads} \
-            ENV=TOLERATE_NUMERICAL_ERRORS=1; >> {log} 2>&1 \
+            ENV='TOLERATE_NUMERICAL_ERRORS=1;' >> {log} 2>&1 \
             || (echo '{{"status": "FAILED"}}' > {output.json} \
                 && echo "ERROR: Contrast-FEL did not complete." >> {log})
         """

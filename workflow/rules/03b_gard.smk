@@ -60,16 +60,20 @@ rule hyphy_gard:
             exit 0
         fi
 
-        # ENV=TOLERATE_NUMERICAL_ERRORS must be a command-line argument; HyPhy does not
-        # read it from the process environment. Writing --output-lf to /dev/null makes
-        # HyPhy try to create '/dev/null.fit.bf', which fails, so use a real path.
+        # ENV must be a command-line argument; HyPhy does not read it from the process
+        # environment, and its value is HBL source, so the trailing semicolon belongs to
+        # HyPhy and must be quoted. Unquoted, bash split the line there: hyphy ran as its
+        # own command with no redirect, and '>> log || fallback' became a separate no-op
+        # that always succeeded, so GARD output went to the console and a crash never
+        # wrote the FAILED sentinel. Writing --output-lf to /dev/null makes HyPhy try to
+        # create '/dev/null.fit.bf', which fails, so use a real path.
         hyphy gard \
             --alignment {input.codon_aln} \
             --output {output.json} \
             --output-lf {output.json}.lf \
             --rate-classes {params.rate_classes} \
             CPU={threads} \
-            ENV=TOLERATE_NUMERICAL_ERRORS=1; >> {log} 2>&1 \
+            ENV='TOLERATE_NUMERICAL_ERRORS=1;' >> {log} 2>&1 \
             || (echo '{{"status": "FAILED"}}' > {output.json} \
                 && echo "ERROR: GARD did not complete; see above." >> {log})
 
