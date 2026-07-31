@@ -49,6 +49,24 @@ def has_branch_contrast(virus_group):
             for v in members if v in config["viruses"]}
     return "Reservoir" in cats and bool(cats - {"Reservoir"})
 
+def group_partition(virus_group):
+    """
+    Virus names in a group, split into the foreground and reference sets.
+
+    merge_sequences.py prefixes every header with the virus it came from, so
+    these names are what the tree labeller matches on. Deriving the partition
+    from config beats inferring it from words in a sequence name: a group whose
+    human-derived fetch came back empty then fails at labelling with a message
+    about the empty dataset, instead of inside HyPhy with a message about a
+    branch set that was never created.
+    """
+    members = config["virus_groups"][virus_group]["viruses"]
+    foreground, reference = [], []
+    for v in members:
+        cat = config["viruses"].get(v, {}).get("category", "")
+        (reference if cat == "Reservoir" else foreground).append(v)
+    return foreground, reference
+
 wildcard_constraints:
     protein="|".join(ALL_PROTEINS),
     virus_group="|".join(VIRUS_GROUPS)

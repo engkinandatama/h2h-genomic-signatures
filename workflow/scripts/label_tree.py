@@ -14,6 +14,18 @@ def parse_args():
                         help="Virus category (H2H, Spillover, Reservoir)")
     parser.add_argument("--h2h_taxa",   nargs="*", default=[],
                         help="List of specific H2H taxa names to label")
+    parser.add_argument("--foreground-prefixes", nargs="*", default=[],
+                        dest="foreground_prefixes",
+                        help="Virus names whose records form the foreground. The "
+                             "merge step prefixes every header with its virus "
+                             "name, so these are matched as exact prefixes.")
+    parser.add_argument("--reference-prefixes", nargs="*", default=[],
+                        dest="reference_prefixes",
+                        help="Virus names whose records form the reference set.")
+    parser.add_argument("--require-contrast", action="store_true",
+                        dest="require_contrast",
+                        help="Fail if either branch set ends up empty. Set for "
+                             "groups that feed Contrast-FEL and RELAX.")
     parser.add_argument("--bootstrap-threshold", type=float, default=0.0,
                         dest="bootstrap_threshold",
                         help="Collapse internal branches with bootstrap support "
@@ -63,11 +75,28 @@ def collapse_low_bootstrap_nodes(newick_str, threshold):
 # Branch labeling
 # ---------------------------------------------------------------------------
 
-def label_leaves(newick_str, tag="{Foreground}", target_taxa=None):
+def label_leaves(newick_str, tag="{Foreground}", target_taxa=None,
+                 fg_prefixes=None, ref_prefixes=None, counts=None):
     """
     Label leaf nodes (sequence IDs) that represent H2H/Spillover taxa.
     Applies HyPhy branch annotation format: TaxonName{Foreground}.
+
+    When fg_prefixes/ref_prefixes are given, tips are partitioned by the virus
+    each record came from, which merge_sequences.py has already written into the
+    header as a prefix. That is authoritative. The substring heuristic below is
+    only a fallback: it guessed the partition from the words "h2h", "spillover"
+    and "reservoir" appearing anywhere in a name, and when a group's human-derived
+    dataset was empty it produced a tree with a Reference set and no Foreground
+    set at all. HyPhy then failed with "'Foreground' is not a valid choice",
+    which says nothing about the missing sequences that actually caused it.
     """
+    # Longest prefix first, so one virus name that begins with another cannot
+    # capture the other's tips.
+    ordered = sorted(
+        [(p, tag) for p in (fg_prefixes or [])]
+        + [(p, "{Reference}") for p in (ref_prefixes or [])],
+        key=lambda kv: -len(kv[0]))
+
     def replace_leaf(match):
         node_name = match.group(1)
         # Skip pure numeric tokens (bootstrap values or branch lengths)
@@ -75,6 +104,16 @@ def label_leaves(newick_str, tag="{Foreground}", target_taxa=None):
             return match.group(0)
 
         if any(c.isalpha() for c in node_name):
+            if ordered:
+                for prefix, label in ordered:
+                    if node_name.startswith(prefix):
+                        if counts is not None:
+                            counts[label] = counts.get(label, 0) + 1
+                        return f"{node_name}{label}"
+                if counts is not None:
+                    counts["unmatched"] = counts.get("unmatched", 0) + 1
+                return match.group(0)
+
             if target_taxa:
                 if any(t.lower() in node_name.lower() for t in target_taxa):
                     return f"{node_name}{tag}"
@@ -125,7 +164,32 @@ def main():
 
     # Step 2: Label H2H/Spillover leaves as Foreground
     print(f"Labeling tree {args.tree} for Foreground (H2H/Spillover) branches...")
-    labeled_tree = label_leaves(tree_str, tag="{Foreground}", target_taxa=args.h2h_taxa)
+    counts = {}
+    labeled_tree = label_leaves(tree_str, tag="{Foreground}",
+                                target_taxa=args.h2h_taxa,
+                                fg_prefixes=args.foreground_prefixes,
+                                ref_prefixes=args.reference_prefixes,
+                                counts=counts)
+
+    n_fg = counts.get("{Foreground}", 0)
+    n_ref = counts.get("{Reference}", 0)
+    n_un = counts.get("unmatched", 0)
+    print(f"Tips labelled: {n_fg} Foreground, {n_ref} Reference, {n_un} unmatched.")
+    if args.foreground_prefixes:
+        print(f"  foreground prefixes: {', '.join(args.foreground_prefixes)}")
+    if args.reference_prefixes:
+        print(f"  reference prefixes : {', '.join(args.reference_prefixes)}")
+
+    if args.require_contrast and (n_fg == 0 or n_ref == 0):
+        # Stop here rather than write a tree that cannot support the contrast.
+        # Contrast-FEL and RELAX would otherwise fail deep inside HyPhy with an
+        # error that names the missing label but not the missing data.
+        print(f"ERROR: this group is configured for a branch contrast, but the "
+              f"tree has {n_fg} foreground and {n_ref} reference tips. One side "
+              f"is empty, so no contrast exists.", file=sys.stderr)
+        print(f"       Check that both viruses in the group produced sequences; "
+              f"an empty fetch upstream is the usual cause.", file=sys.stderr)
+        sys.exit(1)
 
     out_dir = os.path.dirname(args.out)
     if out_dir:

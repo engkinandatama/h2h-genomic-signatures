@@ -8,7 +8,10 @@ rule label_tree:
     log:
         WORKDIR + "/logs/label_tree/{virus_group}_{protein}.log"
     params:
-        bootstrap_threshold=config.get("params", {}).get("bootstrap_threshold", 0)
+        bootstrap_threshold=config.get("params", {}).get("bootstrap_threshold", 0),
+        foreground=lambda w: " ".join(group_partition(w.virus_group)[0]),
+        reference=lambda w: " ".join(group_partition(w.virus_group)[1]),
+        require=lambda w: "--require-contrast" if has_branch_contrast(w.virus_group) else ""
     conda:
         "../envs/selection.yaml"
     shell:
@@ -22,6 +25,9 @@ rule label_tree:
         python workflow/scripts/label_tree.py \
             --tree {input.tree} \
             --out  {output.labeled_tree} \
+            --foreground-prefixes {params.foreground} \
+            --reference-prefixes {params.reference} \
+            {params.require} \
             --bootstrap-threshold {params.bootstrap_threshold} >> {log} 2>&1
         """
 
