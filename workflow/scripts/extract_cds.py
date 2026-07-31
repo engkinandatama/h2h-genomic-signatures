@@ -34,6 +34,24 @@ def translate_dna(dna_seq):
         protein.append(amino_acid)
     return "".join(protein)
 
+def matches_any(value, pattern):
+    """
+    True when `value` contains any of the pipe-separated keywords in `pattern`.
+
+    Config filters are alternations: geo_filter "Bangladesh|India" means either
+    country. Testing the whole pattern as one substring can never match a field
+    holding a single country, so every record is dropped and the dataset comes
+    back empty. That is what emptied Nipah_NiVB_H2H the moment India was merged
+    into the NiV-B clade; while the value was the single word "Bangladesh" the
+    substring test happened to agree with the intent.
+    """
+    if not pattern:
+        return True
+    haystack = (value or "").lower()
+    return any(k.strip().lower() in haystack
+               for k in pattern.split("|") if k.strip())
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Filter virus genomes and extract CDS from NCBI Datasets ZIP")
     parser.add_argument("--zip", required=True, help="Input NCBI datasets zip file")
@@ -190,14 +208,12 @@ def main():
                     host_name = host_obj.get('organismName') or host_obj.get('name') or ''
                     
                     # Apply Geographic Filter jika ada
-                    if args.geo and args.geo.lower() not in location.lower():
+                    if not matches_any(location, args.geo):
                         continue
-                        
+
                     # Apply Host Filter jika ada (H2H vs Reservoir)
-                    if args.host:
-                        host_keywords = [k.strip().lower() for k in args.host.split('|')]
-                        if not any(k in host_name.lower() for k in host_keywords):
-                            continue
+                    if not matches_any(host_name, args.host):
+                        continue
                     
                     valid_accessions.append(acc)
             

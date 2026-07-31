@@ -105,6 +105,24 @@ def bvbrc_get(endpoint, params_str, accept_header="application/json", retries=3)
             time.sleep(2 ** attempt + random.random())
     return None
 
+def matches_any(value, pattern):
+    """
+    True when `value` contains any of the pipe-separated keywords in `pattern`.
+
+    Config filters are alternations: geo_filter "Bangladesh|India" means either
+    country. Testing the whole pattern as one substring can never match a field
+    holding a single country, so every record is dropped and the dataset comes
+    back empty. That is what emptied Nipah_NiVB_H2H the moment India was merged
+    into the NiV-B clade; while the value was the single word "Bangladesh" the
+    substring test happened to agree with the intent.
+    """
+    if not pattern:
+        return True
+    haystack = (value or "").lower()
+    return any(k.strip().lower() in haystack
+               for k in pattern.split("|") if k.strip())
+
+
 def fetch_genomes(taxon_id, geo_filter, host_filter):
     all_records = []
     offset = 0
@@ -135,13 +153,11 @@ def fetch_genomes(taxon_id, geo_filter, host_filter):
         host = (r.get("host_name") or r.get("host_common_name") or "").lower()
         geo = (r.get("geographic_location") or "").lower()
         
-        if geo_filter and geo_filter.lower() not in geo:
+        if not matches_any(geo, geo_filter):
             continue
-            
-        if host_filter:
-            host_keywords = [k.strip().lower() for k in host_filter.split('|')]
-            if not any(k in host for k in host_keywords):
-                continue
+
+        if not matches_any(host, host_filter):
+            continue
                 
         valid_ids.append(r.get("genome_id"))
         
