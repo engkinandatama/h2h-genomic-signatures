@@ -198,7 +198,10 @@ virus_groups:
     uniprot_id: "Q89905"  # fallback (GnGc)
     uniprot_ids:
       GnGc: "Q89905"      # Sin Nombre virus envelopment polyprotein (Gn+Gc)
-      L_protein: "A0A0P0ALW1"  # Sin Nombre virus RNA-directed RNA polymerase L
+      # Q89709 rather than the TrEMBL entry A0A0P0ALW1: same protein, same 2153 aa,
+      # but reviewed and, unlike A0A0P0ALW1, present in AlphaFold DB, so the
+      # structural mapping for this dataset is possible at all.
+      L_protein: "Q89709"      # Sin Nombre virus RNA-directed RNA polymerase L
   Puumala_virus:
     viruses: ["Puumala_virus_Spillover", "Puumala_Reservoir"]
     proteins: ["GnGc", "L_protein"]

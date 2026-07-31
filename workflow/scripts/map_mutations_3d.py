@@ -155,7 +155,7 @@ def download_alphafold_pdb(uniprot_id, temp_path):
         print(f"Error: Gagal mengunduh PDB untuk UniProt {uniprot_id} via fallback: {e}")
         return False, 1
 
-def fail_no_structure(uniprot_id, out_pdb, out_html, n_sites):
+def fail_no_structure(uniprot_id, out_pdb, out_html, n_sites, out_mapping=""):
     """
     Write an explicit 'no structure' marker instead of a mock PDB.
 
@@ -179,8 +179,18 @@ def fail_no_structure(uniprot_id, out_pdb, out_html, n_sites):
             "protein could not be mapped onto a structure.</p>"
             "<p>This page is a placeholder recording that absence. It is not a "
             "failed render.</p></body></html>")
-    print(f"ERROR: no AlphaFold model for {uniprot_id}; wrote explicit "
-          f"no-structure markers.", file=sys.stderr)
+    # The coordinate map is a declared rule output, so it must exist even when
+    # there is nothing to map. Writing only the header records "no sites could be
+    # placed" without letting the rule fail on a missing file, which is what took
+    # down every dataset whose accession AlphaFold has no model for.
+    if out_mapping:
+        os.makedirs(os.path.dirname(out_mapping) or ".", exist_ok=True)
+        with open(out_mapping, "w") as fh:
+            fh.write("alignment_column\treference_residue\tpdb_residue\t"
+                     "uniprot_residue\tin_model\n")
+    print(f"NOTE: AlphaFold DB has no model for {uniprot_id}; wrote explicit "
+          f"no-structure markers. This is a property of the accession, not a "
+          f"pipeline failure.", file=sys.stderr)
 
 def main():
     args = parse_args()
@@ -198,7 +208,7 @@ def main():
     
     if not download_success:
         fail_no_structure(args.uniprot, args.out_pdb, args.out_html,
-                          len(positive_sites))
+                          len(positive_sites), args.out_mapping)
         return
 
 
