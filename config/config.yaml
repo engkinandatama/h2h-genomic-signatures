@@ -284,7 +284,8 @@ params:
   # screened cannot be reported as clean. State the count in the Methods.
   gard:
     rate_classes: 4
-    skip_datasets: []
+    skip_datasets:
+      - "Puumala_virus/L_protein"
 
   # Cross-family convergence analysis (rule analyze_convergence)
   convergence_permutations: 20000   # null model draws for bin co-occurrence
