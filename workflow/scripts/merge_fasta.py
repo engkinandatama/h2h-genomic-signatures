@@ -3,6 +3,7 @@ import argparse
 import os
 import random
 import re
+import sys
 
 def parse_fasta(file_path):
     records = {}
@@ -121,6 +122,21 @@ def merge_and_deduplicate_paired(ncbi_nuc_file, ncbi_prot_file, bvbrc_nuc_file, 
         print(f"Third source supplied {len(extra_ids)} paired records; "
               f"{extra_added} were new after deduplication.")
     print(f"Total unique records before sampling: {len(final_ids)}")
+
+    # A configured virus/protein that yields nothing from every source is always a
+    # defect, never a legitimate result: an empty fetch here produces an alignment
+    # with only the other side of the contrast, a tree with only one branch set,
+    # and a HyPhy error far downstream that names the missing label rather than
+    # the missing data. Both fetchers write their output files and exit 0 when an
+    # API returns nothing, so this is the first place the emptiness can be caught.
+    if not final_ids:
+        print(f"ERROR: no sequences survived the merge. NCBI supplied "
+              f"{len(ncbi_ids)} paired records and BV-BRC {len(bvbrc_ids)}; both "
+              f"are empty, so this dataset cannot be analysed.", file=sys.stderr)
+        print("       Check the two fetch logs for this virus and protein. A "
+              "transient API failure is written as an empty file, not an error.",
+              file=sys.stderr)
+        sys.exit(1)
     
     # Cap to max_seq if needed. Take a seeded random sample of the deduplicated
     # set rather than the first N: the leading records are ordered by accession,
