@@ -57,6 +57,14 @@ rule hyphy_gard:
             echo "SKIPPED by config (params.gard.skip_datasets): recombination" >> {log}
             echo "status is UNKNOWN for this alignment, not clean." >> {log}
             echo '{{"status": "SKIPPED"}}' > {output.json}
+            # The summary is a declared output too. Writing only the JSON here made
+            # Snakemake fail the rule for a missing file, so turning a dataset off
+            # broke the run instead of shortening it.
+            python workflow/scripts/parse_gard.py \
+                --json    {output.json} \
+                --out     {output.summary} \
+                --virus-group {wildcards.virus_group} \
+                --protein {wildcards.protein} >> {log} 2>&1
             exit 0
         fi
 
