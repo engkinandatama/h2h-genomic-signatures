@@ -99,6 +99,7 @@ rule analyze_convergence:
         hotspots=WORKDIR + "/06_statistics/hotspot_bins.tsv",
         permutation=WORKDIR + "/06_statistics/hotspot_permutation_test.tsv",
         domains=WORKDIR + "/06_statistics/domain_enrichment.tsv",
+        positional=WORKDIR + "/06_statistics/positional_bias_test.tsv",
         summary=WORKDIR + "/06_statistics/convergence_summary.json"
     log:
         WORKDIR + "/logs/analyze_convergence/all_groups.log"

@@ -242,6 +242,63 @@ def add_bins(df):
     return df
 
 
+def positional_bias(df_diff, df_all, role, n_perm, rng):
+    """
+    Are this role's differential sites displaced toward the protein N-terminus?
+
+    The bin co-occurrence test asks whether some single bin is shared by many
+    groups. With one to six differential sites per group spread over 100 bins,
+    two groups landing in the same bin is rare by construction, so that test has
+    almost no power and a null result from it is not evidence of absence.
+
+    This asks the same biological question -- do adaptive changes concentrate at
+    one end of the protein -- using every site rather than only those that
+    happen to coincide. The null permutes each group's sites within the
+    positions that group actually has, so it preserves both how many sites a
+    group contributes and where that group could place them.
+
+    Entry and Replication are both reported. Replication is the control: a
+    displacement seen in both roles is an artefact of the site-selection rule or
+    of alignment geometry, not a property of entry proteins.
+    """
+    diff = df_diff[df_diff.role == role]
+    pool = df_all[df_all.role == role]
+    if len(diff) < 5 or pool.empty:
+        return None
+
+    rel_all = ((pool["site"] - 1)
+               / (pool["protein_length"] - 1).clip(lower=1))
+    rel_diff = ((diff["site"] - 1)
+                / (diff["protein_length"] - 1).clip(lower=1))
+    observed = float(rel_diff.mean())
+
+    by_group = {g: sub.values for g, sub in rel_all.groupby(pool["virus_group"])}
+    counts = diff.groupby("virus_group").size().to_dict()
+    counts = {g: n for g, n in counts.items() if g in by_group}
+    if not counts:
+        return None
+
+    hits = 0
+    for _ in range(n_perm):
+        drawn = []
+        for g, n in counts.items():
+            avail = by_group[g]
+            drawn.extend(rng.choice(avail, size=min(n, len(avail)), replace=False))
+        if float(np.mean(drawn)) <= observed:
+            hits += 1
+
+    return {
+        "role": role,
+        "n_sites": int(len(diff)),
+        "n_groups": int(len(counts)),
+        "n_families": int(diff["family"].nunique()) if "family" in diff else -1,
+        "mean_relative_position": round(observed, 4),
+        "background_mean_position": round(float(rel_all.mean()), 4),
+        "permutations": n_perm,
+        "p_value_n_terminal": (hits + 1) / (n_perm + 1),
+    }
+
+
 def hotspot_permutation(df_diff, df_all, role, n_perm, rng):
     """
     Probability that some bin in this role is shared by as many groups as the
@@ -390,6 +447,19 @@ def main():
     pd.DataFrame(perm).to_csv(Path(args.outdir) / "hotspot_permutation_test.tsv",
                               sep="\t", index=False)
 
+    # Same hypothesis, tested with every site instead of only coincidences, and
+    # with Replication as the control. Reported alongside the co-occurrence test,
+    # never instead of it, and corrected across the roles examined.
+    pos = [r for r in (positional_bias(df_diff, df, role, args.permutations, rng)
+                       for role in sorted(df_diff.role.unique())) if r]
+    if pos:
+        raw = [r["p_value_n_terminal"] for r in pos]
+        adj = multipletests(raw, method="fdr_bh")[1] if len(raw) > 1 else raw
+        for r, q in zip(pos, adj):
+            r["q_value_across_roles"] = float(q)
+    pd.DataFrame(pos).to_csv(Path(args.outdir) / "positional_bias_test.tsv",
+                             sep="\t", index=False)
+
     # Groups with no differential site must be reported as zero rather than be
     # absent: a missing row cannot be told apart from a group that was never
     # analysed, and Sudan_ebolavirus disappeared from both outputs that way.
@@ -405,6 +475,7 @@ def main():
     dom.to_csv(Path(args.outdir) / "domain_enrichment.tsv", sep="\t", index=False)
 
     summary = {
+        "positional_bias": pos,
         "n_sites_total": int(len(df)),
         "n_sites_testable": int(df.testable.sum()),
         "n_differential_raw_p": int(len(df_diff)),
