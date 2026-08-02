@@ -23,10 +23,12 @@ rule align_proteins:
         echo "Starting MAFFT alignment for {wildcards.virus_group} - {wildcards.protein}" > {log}
         
         # Check if merged file is empty or has < 4 sequences
-        # grep -c prints 0 and ALSO exits 1 when nothing matches, so `|| echo 0`
-        # appended a second line and n_seqs became "0\n0". The -lt test then failed
-        # with "integer expression expected", the skip branch was never taken, and
-        # mafft was handed an empty file.
+        # grep -c prints 0 and ALSO exits 1 when nothing matches, so an earlier
+        # `|| echo 0` appended a second line and n_seqs held two zeros. The -lt
+        # test then failed with "integer expression expected", the skip branch was
+        # never taken, and mafft was handed an empty file. Note there is no escape
+        # sequence in this comment: Snakemake expands backslash-n inside the shell
+        # block, which would split the comment and leave the tail as a command.
         n_seqs=$(grep -c "^>" {input.fasta} 2>/dev/null | head -1)
         n_seqs=${{n_seqs:-0}}
         if [ "$n_seqs" -lt 4 ]; then
