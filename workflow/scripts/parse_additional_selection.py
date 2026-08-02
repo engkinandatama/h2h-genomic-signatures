@@ -25,16 +25,62 @@ import sys
 # Shared helpers (same pattern as parse_hyphy.py)
 # ---------------------------------------------------------------------------
 
-def load_json(path):
+STATUS_SENTINELS = {}
+
+
+def benjamini_hochberg(pvals):
+    """
+    BH q-values for a list of (key, p) pairs; returns {key: q}.
+
+    Every site model here is applied once per codon -- 546 to 2350 tests per
+    alignment -- and the pipeline reported raw p < 0.05 throughout. Across the
+    study that is 75 MEME calls of which 2 survive correction, so the correction
+    is not a formality.
+    """
+    usable = [(k, float(v)) for k, v in pvals
+              if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0]
+    n = len(usable)
+    if n == 0:
+        return {}
+    usable.sort(key=lambda kv: kv[1])
+    q = {}
+    prev = 1.0
+    for i in range(n - 1, -1, -1):
+        k, pv = usable[i]
+        prev = min(prev, pv * n / (i + 1), 1.0)
+        q[k] = prev
+    return q
+
+
+def load_json(path, label=""):
+    """
+    Load a HyPhy JSON, recording sentinel files instead of silently treating
+    them as an analysis that ran and found nothing.
+
+    The rules write {"status": "FAILED"} when HyPhy crashes and
+    {"status": "NOT_APPLICABLE"} when a group has no branch contrast. Both used
+    to arrive here as a dict without an "MLE" key, which every parser turns into
+    an empty result -- indistinguishable from a clean negative. A crashed MEME
+    run silently removed sites from the consensus while the rule stayed green.
+    """
+    key = label or os.path.basename(path or "?")
     if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        STATUS_SENTINELS[key] = "MISSING"
         return None
     try:
         with open(path) as f:
             data = json.load(f)
-        return data if data else None
     except Exception as e:
         print(f"Warning: cannot read {path}: {e}", file=sys.stderr)
+        STATUS_SENTINELS[key] = "UNREADABLE"
         return None
+    if not data:
+        STATUS_SENTINELS[key] = "EMPTY"
+        return None
+    if isinstance(data, dict) and "MLE" not in data and "status" in data:
+        STATUS_SENTINELS[key] = str(data["status"])
+        return None
+    return data
 
 
 def extract_rows(content):
@@ -204,6 +250,23 @@ def _num(row, idx, default="NA"):
         return default
 
 
+def _permutation_ok(perm, threshold):
+    """
+    True unless HyPhy's permutation test contradicts the likelihood-ratio call.
+
+    A value of -1 means the site was never permuted, which is not evidence
+    either way, so the q-value stands alone. Any real value at or above the
+    threshold is a refutation.
+    """
+    try:
+        value = float(perm)
+    except (TypeError, ValueError):
+        return True
+    if value < 0:
+        return True
+    return value < threshold
+
+
 def parse_contrast_fel(data, pval_thresh, fdr_thresh):
     """
     Contrast-FEL MLE headers (actual HyPhy output):
@@ -270,7 +333,17 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
                 "cfel_perm_p":        perm,
                 "cfel_p":             round(p, 6),
                 "cfel_q":             round(q, 6),
-                "cfel_sig":           q < fdr_thresh,
+                # HyPhy runs a permutation test over branch assignments for
+                # sites whose LRT is significant, precisely because the LRT can
+                # be driven by one substitution against a background rate
+                # estimated at zero. Calling a site significant on the q-value
+                # alone discards that check: of the 11 sites that reached
+                # q < 0.20 in this study, none reached p < 0.05 under
+                # permutation and six sat at exactly 1.0. When HyPhy did not
+                # permute a site it writes -1, and that is not evidence either
+                # way, so the q-value stands alone there.
+                "cfel_sig":           (q < fdr_thresh
+                                       and _permutation_ok(perm, pval_thresh)),
                 "cfel_h2h_stronger":  (
                     isinstance(beta_fg, float) and isinstance(beta_bg, float)
                     and beta_fg > beta_bg and q < fdr_thresh
@@ -375,6 +448,11 @@ def parse_prime(data, pval_thresh):
             overall_p = float(row[overall_p_idx]) if len(row) > overall_p_idx else 1.0
             entry = {"prime_overall_p": round(overall_p, 6)}
             sig_props = []
+            # PRIME's own omnibus test decides whether the per-property tests
+            # should be looked at at all. Reading the properties regardless
+            # flagged 25 sites across the study whose omnibus q was 0.29 or
+            # worse, 23 of them at exactly 1.0.
+            omnibus_ok = overall_p < pval_thresh
             for prop, col in prop_cols.items():
                 p = float(row[col]) if len(row) > col else 1.0
                 entry[f"prime_{prop}_p"] = round(p, 6)
@@ -384,7 +462,8 @@ def parse_prime(data, pval_thresh):
             for prop in CANONICAL:
                 if f"prime_{prop}_p" not in entry:
                     entry[f"prime_{prop}_p"] = "NA"
-            entry["prime_sig_properties"] = "|".join(sig_props) if sig_props else "None"
+            entry["prime_sig_properties"] = (
+                "|".join(sig_props) if (sig_props and omnibus_ok) else "None")
             out[i + 1] = entry
         except (TypeError, ValueError):
             entry = {"prime_overall_p": 1.0, "prime_sig_properties": "None"}
@@ -395,23 +474,38 @@ def parse_prime(data, pval_thresh):
 
 
 def read_gard_warning(gard_summary_path):
-    """Read GARD summary TSV and return True if recombination was detected."""
+    """
+    Tri-state recombination flag: "Yes", "No" or "Unknown".
+
+    A boolean cannot carry the difference between an alignment GARD screened and
+    found clean and one it never screened. Puumala L is on the skip list and its
+    summary says status=SKIPPED with recombination_detected=NA; returning False
+    for that reported it as free of recombination, which is exactly what the
+    config comment forbids.
+    """
     if not gard_summary_path or not os.path.exists(gard_summary_path):
-        return False
+        return "Unknown"
     try:
         with open(gard_summary_path) as f:
             header = f.readline().rstrip("\n").split("\t")
             line = f.readline().rstrip("\n")
             if not line:
-                return False
+                return "Unknown"
             # Look the column up by name. This used to index position 2, which
             # stopped being recombination_detected the moment a status column was
             # added in front of it, so the test compared "OK" against "true" and
             # every alignment reported no recombination.
             row = dict(zip(header, line.split("\t")))
-            return row.get("recombination_detected", "").strip().lower() == "true"
+            if row.get("status", "").strip().upper() != "OK":
+                return "Unknown"
+            detected = row.get("recombination_detected", "").strip().lower()
+            if detected == "true":
+                return "Yes"
+            if detected == "false":
+                return "No"
+            return "Unknown"
     except Exception:
-        return False
+        return "Unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -445,28 +539,55 @@ def parse_args():
 def main():
     args = parse_args()
 
-    meme_res   = parse_meme(load_json(args.meme),   args.pvalue)
-    fel_res, fel_pos = parse_fel(load_json(args.fel), args.pvalue)
-    fubar_res  = parse_fubar(load_json(args.fubar), args.fubar_pp)
-    slac_res   = parse_slac(load_json(args.slac),   args.pvalue)
-    cfel_res   = parse_contrast_fel(load_json(args.contrast_fel), args.pvalue, args.contrast_fdr)
-    prime_res  = parse_prime(load_json(args.prime), args.pvalue)
+    meme_res   = parse_meme(load_json(args.meme, "meme"),   args.pvalue)
+    fel_res, fel_pos = parse_fel(load_json(args.fel, "fel"), args.pvalue)
+    fubar_res  = parse_fubar(load_json(args.fubar, "fubar"), args.fubar_pp)
+    slac_res   = parse_slac(load_json(args.slac, "slac"),   args.pvalue)
+    cfel_res   = parse_contrast_fel(load_json(args.contrast_fel, "contrast_fel"), args.pvalue, args.contrast_fdr)
+    prime_res  = parse_prime(load_json(args.prime, "prime"), args.pvalue)
     gard_warn  = read_gard_warning(args.gard)
 
     # Determine total sites
     all_dicts = [meme_res, fel_res, fubar_res, slac_res, cfel_res, prime_res]
     total = max((max(d.keys(), default=0) for d in all_dicts if d), default=0)
 
+    if STATUS_SENTINELS:
+        for name, status in sorted(STATUS_SENTINELS.items()):
+            print(f"[{args.virus_group}/{args.protein}] {name}: {status}",
+                  file=sys.stderr)
+    # NOT_APPLICABLE is a legitimate state for the two branch-aware tests in a
+    # group with no reservoir comparator. Anything else, on any of the four site
+    # models, means an analysis did not run -- and a missing site model silently
+    # removes sites from the consensus while leaving the rule green.
+    fatal = {n: st for n, st in STATUS_SENTINELS.items()
+             if not (n in ("contrast_fel",) and st == "NOT_APPLICABLE")}
+    if fatal:
+        print(f"ERROR: {args.virus_group}/{args.protein}: these analyses produced "
+              f"no usable output: {fatal}. Refusing to write a table that would "
+              f"read as a clean negative.", file=sys.stderr)
+        sys.exit(1)
+
     if total == 0:
-        print("Warning: No site data found in any of the input files.", file=sys.stderr)
+        print("ERROR: no site data in any input file; refusing to write an empty "
+              "table that downstream steps would treat as a real result.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # FDR across codons, per alignment and per method.
+    meme_q = benjamini_hochberg(list(meme_res.items()))
+    fel_q_map = benjamini_hochberg([(k, v) for k, v in fel_res.items()])
+    slac_q = benjamini_hochberg([(k, v["slac_p"]) for k, v in slac_res.items()
+                                 if isinstance(v.get("slac_p"), float)])
+    prime_q = benjamini_hochberg([(k, v["prime_overall_p"]) for k, v in prime_res.items()
+                                  if isinstance(v.get("prime_overall_p"), float)])
 
     header = [
         "site",
-        "meme_p", "fel_p", "fubar_pp",
-        "slac_ds", "slac_dn", "slac_dN_minus_dS", "slac_p", "slac_np",
+        "meme_p", "meme_q", "fel_p", "fel_q", "fubar_pp",
+        "slac_ds", "slac_dn", "slac_dN_minus_dS", "slac_p", "slac_q", "slac_np",
         "cfel_beta_h2h", "cfel_beta_ref", "cfel_subs_fg", "cfel_perm_p",
         "cfel_p", "cfel_q", "cfel_sig",
-        "prime_overall_p",
+        "prime_overall_p", "prime_overall_q",
         "prime_hydrophobicity_p", "prime_isoelectric_point_p", "prime_volume_p",
         "prime_polarity_p", "prime_charge_p", "prime_composition_p",
         "prime_sig_properties",
@@ -545,15 +666,32 @@ def main():
             if cf["cfel_sig"]:
                 n_cfell_sig += 1
 
+            # %.6g rather than round(x, 6): the strongest MEME hit in the study
+            # is p = 5.1e-10 and rounding wrote it as 0.0, erasing the magnitude
+            # of the one result that survives correction.
+            def g(x):
+                return f"{x:.6g}" if isinstance(x, float) else x
+
+            # HyPhy writes -1 in the permutation column for sites it did not
+            # permute. Left as a number, any `perm_p < 0.05` filter downstream
+            # treats those 15536 sites as maximally significant.
+            perm_raw = cf["cfel_perm_p"]
+            try:
+                perm_out = "NA" if float(perm_raw) < 0 else g(float(perm_raw))
+            except (TypeError, ValueError):
+                perm_out = "NA"
+
             row = [
                 site,
-                round(mp,  6), round(fp, 6), round(fup, 6),
+                g(mp), g(meme_q.get(site, 1.0)),
+                g(fp), g(fel_q_map.get(site, 1.0)),
+                g(fup),
                 sl["slac_ds"], sl["slac_dn"], sl["slac_dN_minus_dS"],
-                sl["slac_p"], sl["slac_np"],
+                g(sl["slac_p"]), g(slac_q.get(site, 1.0)), g(sl["slac_np"]),
                 cf["cfel_beta_h2h"], cf["cfel_beta_ref"],
-                cf["cfel_subs_fg"], cf["cfel_perm_p"],
+                cf["cfel_subs_fg"], perm_out,
                 cf["cfel_p"], cf["cfel_q"], cf["cfel_sig"],
-                pr["prime_overall_p"],
+                pr["prime_overall_p"], g(prime_q.get(site, 1.0)),
                 pr["prime_hydrophobicity_p"], pr["prime_isoelectric_point_p"],
                 pr["prime_volume_p"], pr["prime_polarity_p"],
                 pr["prime_charge_p"], pr["prime_composition_p"],

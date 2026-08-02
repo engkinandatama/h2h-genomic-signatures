@@ -176,26 +176,53 @@ def load_sites(paths, meta):
     return pd.concat(frames, ignore_index=True)
 
 
-def mark_differential(df, pval):
-    for col in ("cfel_p", "cfel_beta_h2h", "cfel_beta_ref", "cfel_q"):
+def mark_differential(df, pval, fdr):
+    for col in ("cfel_p", "cfel_beta_h2h", "cfel_beta_ref", "cfel_q",
+                "meme_q", "fel_q", "meme_p", "fel_p", "fubar_pp"):
         if col in df:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     consensus = df.get("consensus_pos", pd.Series(False, index=df.index))
     consensus = consensus.astype(str).str.lower().eq("true")
 
-    contrast_hit = (
+    # ONE rule for every group. Previously groups with a reservoir comparator
+    # were scored by Contrast-FEL at raw p < 0.05 while Ebola and Sudan, which
+    # have no comparator, were scored by consensus_pos. That is a 6.8-fold
+    # difference in stringency (129 sites against 19 on the same six groups),
+    # and it falls exactly along the H2H/comparator split, so any comparison of
+    # differential-site burden between groups measured which rule the group
+    # received rather than its biology.
+    #
+    # consensus_pos is the rule that every group can be scored by, so it is the
+    # one applied. The branch contrast is retained as an annotation on the sites
+    # it can speak to, never as an alternative entry route.
+    contrast_support = (
         df["mode"].eq("contrast")
         & df["cfel_p"].lt(pval)
         & df["cfel_beta_h2h"].gt(df["cfel_beta_ref"])
-    )
-    site_level_hit = df["mode"].eq("site_level") & consensus
+    ).fillna(False)
+    df["contrast_support"] = contrast_support
+    df["differential"] = consensus.fillna(False)
 
-    df["differential"] = (contrast_hit | site_level_hit).fillna(False)
-    # A site is "testable" when the contrast actually produced an estimate.
-    df["testable"] = df["mode"].eq("site_level") | df["cfel_p"].lt(1.0)
-    if "cfel_q" in df:
-        df["differential_fdr"] = df["differential"] & df["cfel_q"].lt(pval)
+    # "Testable" means the site models were fitted at this codon, which is true
+    # wherever a p-value was produced. The previous definition counted every
+    # Ebola and Sudan site as testable through a mode short-circuit while
+    # discarding 8335 contrast sites whose Contrast-FEL p-value was exactly 1 --
+    # p = 1 is a result, not a missing one.
+    testable = pd.Series(False, index=df.index)
+    for col in ("meme_p", "fel_p", "fubar_pp"):
+        if col in df:
+            testable = testable | pd.to_numeric(df[col], errors="coerce").notna()
+    df["testable"] = testable
+
+    # FDR on the same quantity the rule uses, so the correction is reachable for
+    # every group. Keying it on cfel_q made it structurally impossible for the
+    # two groups without a contrast, whose cfel_q is 1.0 by construction.
+    q_cols = [c for c in ("meme_q", "fel_q") if c in df]
+    if q_cols:
+        q_min = pd.concat([pd.to_numeric(df[c], errors="coerce") for c in q_cols],
+                          axis=1).min(axis=1)
+        df["differential_fdr"] = df["differential"] & q_min.lt(fdr)
     else:
         df["differential_fdr"] = False
     return df
@@ -310,7 +337,7 @@ def main():
               file=sys.stderr)
 
     df = load_sites(args.all_sites, meta)
-    df = mark_differential(df, args.pvalue)
+    df = mark_differential(df, args.pvalue, args.fdr)
     df = add_bins(df)
 
     gard = load_gard(args.gard)
@@ -320,8 +347,16 @@ def main():
     df_diff.to_csv(Path(args.outdir) / "differential_sites.tsv",
                    sep="\t", index=False)
 
+    # Reindexed over every (group, category, protein) actually analysed, so a
+    # group with no differential site is a row of zero rather than an absence.
+    universe = (df[["virus_group", "category", "protein"]]
+                .drop_duplicates().sort_values(["virus_group", "protein"]))
     counts = (df_diff.groupby(["virus_group", "category", "protein"])
               .size().reset_index(name="n_differential"))
+    counts = (universe.merge(counts, on=["virus_group", "category", "protein"],
+                             how="left")
+              .fillna({"n_differential": 0}))
+    counts["n_differential"] = counts["n_differential"].astype(int)
     counts.to_csv(Path(args.outdir) / "differential_site_counts.tsv",
                   sep="\t", index=False)
 
@@ -333,18 +368,41 @@ def main():
     if not pivot.empty:
         pivot["n_groups"] = (pivot > 0).sum(axis=1)
         hotspots = pivot[pivot.n_groups >= 2].sort_values("n_groups", ascending=False)
-        hotspots.to_csv(Path(args.outdir) / "hotspot_bins.tsv", sep="\t")
     else:
-        hotspots = pd.DataFrame()
+        hotspots = pd.DataFrame(columns=["role", "bin_100", "n_groups"])
+    # Written on both paths. This is a declared rule output, and skipping it when
+    # no site is differential failed the very last job in the DAG after every
+    # expensive step had already succeeded.
+    hotspots.to_csv(Path(args.outdir) / "hotspot_bins.tsv", sep="\t")
 
     perm = [r for r in (hotspot_permutation(df_diff, df, role, args.permutations, rng)
                         for role in sorted(df_diff.role.unique())) if r]
+    # One test per functional role means the family is the set of roles, not each
+    # role alone. Reporting three uncorrected p-values invites quoting whichever
+    # is smallest: Replication at 0.035 becomes q = 0.10 over three tests, which
+    # does not clear 0.05.
+    if perm:
+        raw = [r["p_value"] for r in perm]
+        adj = multipletests(raw, method="fdr_bh")[1] if len(raw) > 1 else raw
+        for r, q in zip(perm, adj):
+            r["q_value_across_roles"] = float(q)
+            r["n_roles_tested"] = len(perm)
     pd.DataFrame(perm).to_csv(Path(args.outdir) / "hotspot_permutation_test.tsv",
                               sep="\t", index=False)
 
+    # Groups with no differential site must be reported as zero rather than be
+    # absent: a missing row cannot be told apart from a group that was never
+    # analysed, and Sudan_ebolavirus disappeared from both outputs that way.
+    all_groups = sorted(df["virus_group"].dropna().unique())
+
     dom = domain_enrichment(df, df_diff, domains, args.fdr)
-    if not dom.empty:
-        dom.to_csv(Path(args.outdir) / "domain_enrichment.tsv", sep="\t", index=False)
+    if dom.empty:
+        dom = pd.DataFrame(columns=["role", "protein", "domain", "n_differential",
+                                    "n_tested", "odds_ratio", "p_value", "q_value"])
+    # Also written unconditionally: a stale copy from an earlier run would
+    # otherwise survive a rerun that found no enriched domain, and contradict
+    # convergence_summary.json.
+    dom.to_csv(Path(args.outdir) / "domain_enrichment.tsv", sep="\t", index=False)
 
     summary = {
         "n_sites_total": int(len(df)),
@@ -352,7 +410,7 @@ def main():
         "n_differential_raw_p": int(len(df_diff)),
         "n_differential_after_fdr": int(df.differential_fdr.sum()),
         "threshold_raw_p": args.pvalue,
-        "groups": {g: int(n) for g, n in df_diff.virus_group.value_counts().items()},
+        "groups": {g: int((df_diff.virus_group == g).sum()) for g in all_groups},
         "hotspot_bins": int(len(hotspots)),
         "permutation_tests": perm,
         "domains_significant_after_fdr": (

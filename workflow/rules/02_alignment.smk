@@ -23,7 +23,12 @@ rule align_proteins:
         echo "Starting MAFFT alignment for {wildcards.virus_group} - {wildcards.protein}" > {log}
         
         # Check if merged file is empty or has < 4 sequences
-        n_seqs=$(grep -c "^>" {input.fasta} 2>/dev/null || echo "0")
+        # grep -c prints 0 and ALSO exits 1 when nothing matches, so `|| echo 0`
+        # appended a second line and n_seqs became "0\n0". The -lt test then failed
+        # with "integer expression expected", the skip branch was never taken, and
+        # mafft was handed an empty file.
+        n_seqs=$(grep -c "^>" {input.fasta} 2>/dev/null | head -1)
+        n_seqs=${{n_seqs:-0}}
         if [ "$n_seqs" -lt 4 ]; then
             echo "SKIP: Hanya $n_seqs sekuens ditemukan. Membuat file output kosong." >> {log}
             touch {output.msa}

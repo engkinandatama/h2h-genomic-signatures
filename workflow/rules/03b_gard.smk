@@ -39,8 +39,12 @@ rule hyphy_gard:
 
         if [ ! -s "{input.codon_aln}" ]; then
             echo "SKIP: Codon alignment kosong. Melewati GARD." >> {log}
-            echo '{{}}' > {output.json}
-            echo "SKIPPED: alignment empty" > {output.summary}
+            echo '{{"status": "FAILED"}}' > {output.json}
+            python workflow/scripts/parse_gard.py \
+                --json    {output.json} \
+                --out     {output.summary} \
+                --virus-group {wildcards.virus_group} \
+                --protein {wildcards.protein} >> {log} 2>&1
             exit 0
         fi
 
@@ -48,8 +52,12 @@ rule hyphy_gard:
         N_SEQ=$(grep -c '^>' {input.codon_aln} || echo 0)
         if [ "$N_SEQ" -lt 4 ]; then
             echo "SKIP: Hanya $N_SEQ sekuens, minimum 4 diperlukan untuk GARD." >> {log}
-            echo '{{}}' > {output.json}
-            echo "SKIPPED: insufficient sequences ($N_SEQ)" > {output.summary}
+            echo '{{"status": "FAILED"}}' > {output.json}
+            python workflow/scripts/parse_gard.py \
+                --json    {output.json} \
+                --out     {output.summary} \
+                --virus-group {wildcards.virus_group} \
+                --protein {wildcards.protein} >> {log} 2>&1
             exit 0
         fi
 
