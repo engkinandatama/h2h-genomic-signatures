@@ -39,6 +39,15 @@ min_cds_length_fraction: 0.70
 # Sudan GP dataset whose reference length is 2031 bp.
 max_cds_length_fraction: 1.30
 
+# Minimum fraction of a candidate's 5-mers that must occur in the UniProt
+# reference protein. Length cannot separate neighbouring paralogs: a Marburg
+# nucleoprotein is 695 aa against a 681 aa glycoprotein and reached the GP
+# dataset at 102% of the reference length. Across all 1033 sequences here the
+# on-target and off-target populations do not overlap -- the lowest genuine
+# score is 0.459 and every off-target one is 0.00 -- so this cut sits between
+# them with a wide margin. Set to 0 to disable.
+min_reference_identity: 0.30
+
 viruses:
   # ==========================================
   # 1. Hantavirus Family

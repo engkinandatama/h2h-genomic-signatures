@@ -38,6 +38,27 @@ def translate_dna(dna_seq):
         protein.append(codon_table.get(codon, 'X'))
     return "".join(protein)
 
+def _has_keyword(text, keyword):
+    """
+    Substring match bounded to whole tokens.
+
+    A bare `in` test made "l protein" match "nonstructural protein short": the
+    keyword sits inside "nonstructura|l protein". That is how 135 copies of the
+    273 bp NSs gene entered the Puumala L dataset and outnumbered the real
+    6471 bp polymerase 100 to 1, which in turn made the length gate calibrate
+    itself on the contamination. The same trap is open for every short keyword
+    here -- gn, gc, gp, l.
+    """
+    if not text or not keyword:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(keyword) + r"(?![a-z0-9])",
+                     text) is not None
+
+
+def _any_keyword(text, keywords):
+    return any(_has_keyword(text, k) for k in keywords)
+
+
 def protein_matches(target, product_val):
     target = target.lower().strip()
     product_val = product_val.lower().strip() if product_val else ""
@@ -49,9 +70,11 @@ def protein_matches(target, product_val):
     exclusions = {
         "gngc":      ["polymerase", "nucleoprotein", "nucleocapsid", "cofactor"],
         "l_protein": ["cofactor", "complex protein", "vp35", "vp30", "vp24",
-                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein",
+                      "nonstructural", "nss", "ns protein"],
         "l":         ["cofactor", "complex protein", "vp35", "vp30", "vp24",
-                      "vp40", "nucleoprotein", "matrix", "phosphoprotein"],
+                      "vp40", "nucleoprotein", "matrix", "phosphoprotein",
+                      "nonstructural", "nss", "ns protein"],
         "g_protein": ["polymerase", "fusion", "nucleoprotein", "phosphoprotein"],
         "f_protein": ["polymerase", "nucleoprotein", "phosphoprotein"],
         "gp":        ["secreted", "sgp", "ssgp", "soluble", "delta peptide",
@@ -62,19 +85,25 @@ def protein_matches(target, product_val):
             return False
 
     if target == "gngc":
-        return any(x in product_val for x in ["glycoprotein", "gpc", "gn", "gc"]) or "m segment" in product_val
+        return (_any_keyword(product_val, ["glycoprotein", "gpc", "gn", "gc"])
+                or _has_keyword(product_val, "m segment"))
     elif target in ["l_protein", "l"]:
-        return any(x in product_val for x in ["polymerase", "large protein", "l protein", "rdrp", "transcriptase"]) or product_val == "l"
+        return (_any_keyword(product_val, ["polymerase", "large protein",
+                                           "l protein", "rdrp", "transcriptase"])
+                or product_val == "l")
     elif target == "g_protein":
-        return any(x in product_val for x in ["glycoprotein g", "attachment", "g protein", "g-protein", "receptor-binding"]) or product_val == "glycoprotein"
+        return (_any_keyword(product_val, ["glycoprotein g", "attachment",
+                                           "g protein", "g-protein",
+                                           "receptor-binding"])
+                or product_val == "glycoprotein")
     elif target == "f_protein":
-        return any(x in product_val for x in ["fusion", "f protein", "f-protein"])
+        return _any_keyword(product_val, ["fusion", "f protein", "f-protein"])
     elif target == "gp":
         if product_val == "l":
             return False
-        return any(x in product_val for x in ["glycoprotein", "gp"])
+        return _any_keyword(product_val, ["glycoprotein", "gp"])
     else:
-        return target in product_val
+        return _has_keyword(product_val, target)
 
 def bvbrc_get(endpoint, params_str, accept_header="application/json", retries=3):
     url = f"{BVBRC_API}/{endpoint}/?{params_str}"
@@ -288,6 +317,92 @@ def fetch_features(genome_ids, protein_target, min_len):
               f"dataset is incomplete.", file=sys.stderr, flush=True)
     return passed_nuc, passed_prot
 
+def load_reference_protein(path):
+    """Residues of the UniProt reference for this protein, or '' when absent."""
+    if not path or not os.path.exists(path) or os.path.getsize(path) == 0:
+        return ""
+    residues = []
+    with open(path) as fh:
+        for line in fh:
+            if not line.startswith(">"):
+                residues.append(line.strip())
+    return "".join(residues).replace("*", "")
+
+
+def _kmers(seq, k=5):
+    return {seq[i:i + k] for i in range(len(seq) - k + 1)}
+
+
+def reference_gate(nuc_seqs, prot_seqs, reference, min_frac, max_frac,
+                   min_identity, tag):
+    """
+    Indices to keep after gating candidates against the UniProt reference.
+
+    Two independent checks, because neither alone is sufficient.
+
+    Length, measured against the reference rather than against the candidates
+    themselves. The previous gate took the 90th percentile of whatever came back,
+    which is circular: when BV-BRC returned 135 short CDS for Puumala L, p90 was
+    273 bp, the floor became 191 bp, every fragment passed, and a genuine 6471 bp
+    L protein would have been rejected for exceeding the ceiling. A gate derived
+    from the contaminated set blesses the contamination.
+
+    Identity, as the fraction of a candidate's 5-mers found in the reference.
+    Length cannot separate neighbouring paralogs: a Marburg nucleoprotein is
+    695 aa against a 681 aa glycoprotein and reached the GP dataset at 102% of
+    the reference length. Across all 1033 sequences in this study the two
+    populations do not overlap -- every on-target record scores at least 0.459
+    and every off-target one 0.00 -- so the default cut sits between them.
+    """
+    n = len(nuc_seqs)
+    notes = []
+    if n == 0:
+        return [], notes
+
+    if reference:
+        expected = (len(reference) + 1) * 3      # +1 codon for the stop
+        floor, ceiling = int(min_frac * expected), int(max_frac * expected)
+        basis = f"UniProt reference {len(reference)} aa = {expected} bp"
+        ref_kmers = _kmers(reference)
+    elif n >= 5:
+        lengths = sorted(len(s) for s in nuc_seqs)
+        p90 = lengths[int(0.9 * (n - 1))]
+        floor, ceiling = int(min_frac * p90), int(max_frac * p90)
+        basis = f"90th percentile of candidates {p90} bp"
+        ref_kmers = set()
+        notes.append(f"[{tag}] WARNING: no reference protein supplied; the length "
+                     f"gate falls back to the candidate distribution and cannot "
+                     f"detect a dataset that is contaminated throughout.")
+    else:
+        return list(range(n)), notes
+
+    keep, short, long_, off = [], 0, 0, []
+    for i, nuc in enumerate(nuc_seqs):
+        if len(nuc) < floor:
+            short += 1
+            continue
+        if len(nuc) > ceiling:
+            long_ += 1
+            continue
+        if ref_kmers and min_identity > 0:
+            prot = prot_seqs[i] if i < len(prot_seqs) else ""
+            q = _kmers((prot or "").replace("*", ""))
+            ident = len(q & ref_kmers) / len(q) if q else 1.0
+            if ident < min_identity:
+                off.append((i, round(ident, 3), len(prot or "")))
+                continue
+        keep.append(i)
+
+    notes.append(f"[{tag}] Reference gate ({basis}): keep {floor}-{ceiling} bp and "
+                 f"k-mer identity >= {min_identity}.")
+    if short or long_:
+        notes.append(f"[{tag}]   dropped {short} too short, {long_} too long.")
+    if off:
+        notes.append(f"[{tag}]   dropped {len(off)} off-target (wrong gene): "
+                     f"{[(i, s, f'{l}aa') for i, s, l in off[:5]]}")
+    notes.append(f"[{tag}]   kept {len(keep)} of {n}.")
+    return keep, notes
+
 def write_empty_outputs(out_nuc, out_prot):
     for fpath in [out_nuc, out_prot]:
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
@@ -312,6 +427,15 @@ def main():
                         dest="min_len_fraction",
                         help="Minimum CDS length as a fraction of the 90th-percentile "
                              "candidate length for this protein; 0 disables the gate")
+    parser.add_argument("--reference", default="",
+                        dest="reference",
+                        help="UniProt reference protein FASTA for this virus and "
+                             "protein. Defines the expected CDS length and the "
+                             "k-mer identity a candidate must reach.")
+    parser.add_argument("--min-reference-identity", type=float, default=0.30,
+                        dest="min_reference_identity",
+                        help="Minimum fraction of a candidate's 5-mers that must "
+                             "occur in the reference protein. Default 0.30.")
     parser.add_argument("--max-len-fraction", type=float, default=1.30,
                         dest="max_len_fraction",
                         help="Maximum CDS length as a fraction of the same reference; "
@@ -342,23 +466,14 @@ def main():
     passed_nuc, passed_prot = fetch_features(valid_genome_ids, args.protein, args.min_len)
     print(f"[{args.protein}] Berhasil mengekstrak {len(passed_nuc)} CDS valid dari BV-BRC.", flush=True)
     
-    # Relative length gate, mirroring extract_cds.py. BV-BRC carries the same
-    # partial surveillance fragments as GenBank, and an absolute floor cannot tell
-    # a 265 bp fragment from a full-length CDS.
-    if args.min_len_fraction > 0 and len(passed_nuc) >= 5:
-        lengths = sorted(len(s) for _, s in passed_nuc)
-        p90 = lengths[int(0.9 * (len(lengths) - 1))]
-        floor = int(args.min_len_fraction * p90)
-        # An upper bound is needed as well as a floor. Without it a 6636 bp
-        # L-protein CDS passes a GP dataset whose p90 is 2031 bp, because it
-        # clears the floor from above. Three such records reached the Sudan GP
-        # output before this check existed.
-        ceiling = int(args.max_len_fraction * p90)
-        keep = [i for i, (_, s) in enumerate(passed_nuc) if floor <= len(s) <= ceiling]
-        dropped = len(passed_nuc) - len(keep)
-        if dropped:
-            print(f"[{args.protein}] Relative length gate: reference (p90) = {p90} bp, "
-                  f"floor = {floor} bp, dropped {dropped} partial sequences.", flush=True)
+    if args.min_len_fraction > 0:
+        reference = load_reference_protein(args.reference)
+        keep, notes = reference_gate(
+            [sq for _, sq in passed_nuc], [sq for _, sq in passed_prot],
+            reference, args.min_len_fraction, args.max_len_fraction,
+            args.min_reference_identity, args.protein)
+        for line in notes:
+            print(line, flush=True)
         passed_nuc = [passed_nuc[i] for i in keep]
         passed_prot = [passed_prot[i] for i in keep]
 
