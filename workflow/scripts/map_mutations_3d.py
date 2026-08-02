@@ -16,6 +16,11 @@ def parse_args():
                              "residue numbers; without it the columns are used "
                              "directly, which is only correct for a gapless "
                              "alignment of a full-length reference.")
+    parser.add_argument("--site-columns", dest="site_columns",
+                        default="episodic_only,consensus_pos,cfel_sig",
+                        help="Comma-separated boolean columns of the all_sites "
+                             "table whose True rows are highlighted. Later names "
+                             "win when a site is flagged by more than one.")
     parser.add_argument("--out_mapping", default="",
                         help="Optional TSV recording alignment column -> UniProt "
                              "residue -> PDB residue for every mapped site")
@@ -67,43 +72,50 @@ def build_column_to_residue_map(alignment_path):
             mapping[col] = residue
     return mapping, best_name
 
-def read_selection_sites(results_path):
-    sites = []
+def read_selection_sites(results_path, columns):
+    """
+    Return {alignment_column: category} for every site flagged in `columns`.
+
+    The viewer used to key on cfel_sig alone. Contrast-FEL significance is empty
+    in all but one dataset here, and that dataset has no AlphaFold model, so every
+    published viewer highlighted nothing at all while the tables listed sites. The
+    default set now carries all three evidence tiers, weakest first so that the
+    strongest claim wins a site flagged by more than one: episodic_only (MEME
+    alone, no pervasive support), consensus_pos (agreed by at least min_methods
+    site models), and cfel_sig (rates differ between branch sets). Each is drawn
+    in its own colour rather than merged, so the viewer never implies more
+    evidence for a site than the tables hold.
+    """
+    sites = {}
     if not os.path.exists(results_path):
         print(f"Warning: File hasil seleksi {results_path} tidak ditemukan.")
         return sites
-        
-    with open(results_path, 'r') as f:
-        header_line = f.readline().strip()
-        headers = header_line.split('\t')
-        
-        try:
-            site_idx = headers.index("site")
-            cfel_sig_idx = headers.index("cfel_sig")
-        except ValueError:
-            print("Warning: Format file tidak dikenali (tidak ada kolom 'site' atau 'cfel_sig'). Menggunakan fallback pembacaan kolom 1.")
-            site_idx = 0
-            cfel_sig_idx = -1
-            
+
+    with open(results_path, "r") as f:
+        headers = f.readline().rstrip("\n").split("\t")
+        if "site" not in headers:
+            print("Warning: kolom 'site' tidak ada; tidak ada situs yang dipetakan.",
+                  file=sys.stderr)
+            return sites
+        wanted = [c for c in columns if c in headers]
+        missing = [c for c in columns if c not in headers]
+        if missing:
+            print(f"Warning: kolom {missing} tidak ada di {results_path}.",
+                  file=sys.stderr)
         for line in f:
-            line = line.strip()
+            line = line.rstrip("\n")
             if not line:
                 continue
-            parts = line.split('\t')
+            row = dict(zip(headers, line.split("\t")))
             try:
-                site = int(parts[site_idx])
-                # parse_additional_selection.py writes this column with str(bool),
-                # so the values are "True"/"False" and never "Yes". Comparing
-                # against 'Yes' matched nothing and produced all-blue structures.
-                if cfel_sig_idx != -1:
-                    if (len(parts) > cfel_sig_idx
-                            and parts[cfel_sig_idx].strip().lower() == "true"):
-                        sites.append(site)
-                else:
-                    sites.append(site)
-            except ValueError:
+                site = int(row["site"])
+            except (KeyError, ValueError):
                 continue
+            for col in wanted:
+                if str(row.get(col, "")).strip().lower() == "true":
+                    sites[site] = col
     return sites
+
 
 def download_alphafold_pdb(uniprot_id, temp_path):
     import json
@@ -199,8 +211,10 @@ def main():
     os.makedirs(os.path.dirname(args.out_html) or ".", exist_ok=True)
     
     # 1. Baca situs seleksi positif
-    positive_sites = read_selection_sites(args.selection)
-    print(f"Membaca {len(positive_sites)} situs seleksi positif dari {args.selection}")
+    site_columns = [c.strip() for c in args.site_columns.split(",") if c.strip()]
+    positive_sites = read_selection_sites(args.selection, site_columns)
+    print(f"Membaca {len(positive_sites)} situs terseleksi dari {args.selection} "
+          f"(kolom: {', '.join(site_columns)})")
     
     # 2. Download PDB
     temp_pdb = args.out_pdb + ".temp"
@@ -226,15 +240,16 @@ def main():
               "directly as residue numbers. This is only correct for a gapless "
               "full-length reference.", file=sys.stderr)
 
-    mapping_rows, positive_set, outside = [], set(), []
-    for col in positive_sites:
+    mapping_rows, category_of, outside = [], {}, []
+    for col, category in sorted(positive_sites.items()):
         residue = col2res.get(col, col) if col2res else col
         pdb_res = residue - uniprot_start + 1
         if pdb_res < 1:
             outside.append((col, residue, pdb_res))
             continue
-        positive_set.add(pdb_res)
-        mapping_rows.append((col, residue, pdb_res))
+        category_of[pdb_res] = category
+        mapping_rows.append((col, residue, pdb_res, category))
+    positive_set = set(category_of)
 
     if outside:
         print(f"WARNING: {len(outside)} site(s) fall before the modelled region "
@@ -248,7 +263,14 @@ def main():
                 try:
                     res_num = int(line[22:26].strip())
                     # Warnai residu terpilih dengan B-factor 100.00
-                    b_factor = 100.00 if res_num in positive_set else 0.00
+                    # Three tiers so the viewer never conflates the claims:
+                    # 100 = differential between branch sets (Contrast-FEL),
+                    #  60 = consensus positive selection across site models,
+                    #  30 = episodic only, MEME with no pervasive support.
+                    b_factor = {"cfel_sig": 100.00,
+                                "consensus_pos": 60.00,
+                                "episodic_only": 30.00}.get(
+                                    category_of.get(res_num), 0.00)
                     b_factor_str = f"{b_factor:6.2f}"
                     # Pastikan baris cukup panjang sebelum diparsing
                     if len(line) >= 66:
@@ -287,9 +309,9 @@ def main():
         os.makedirs(os.path.dirname(args.out_mapping) or ".", exist_ok=True)
         with open(args.out_mapping, "w") as fh:
             fh.write("alignment_column\treference_residue\tpdb_residue\t"
-                     "uniprot_residue\tin_model\n")
-            for col, res, pdb_res in mapping_rows:
-                fh.write(f"{col}\t{res}\t{pdb_res}\t{res}\t"
+                     "uniprot_residue\tcategory\tin_model\n")
+            for col, res, pdb_res, category in mapping_rows:
+                fh.write(f"{col}\t{res}\t{pdb_res}\t{res}\t{category}\t"
                          f"{pdb_res in modelled}\n")
 
     # Hapus temp file
@@ -302,9 +324,9 @@ def main():
     # residues, so the same site appeared under two numbers 43 apart.
     site_buttons = "".join(
         f'<button class="site-btn" data-resi="{pdb_res}" '
-        f'title="alignment column {col} = UniProt residue {res}">'
+        f'title="alignment column {col} = UniProt residue {res} ({category})">'
         f'{res}</button>'
-        for col, res, pdb_res in sorted(mapping_rows, key=lambda r: r[1])
+        for col, res, pdb_res, category in sorted(mapping_rows, key=lambda r: r[1])
         if pdb_res in modelled) or (
         '<span style="opacity:.7">No site could be mapped onto this model.</span>')
 
@@ -392,6 +414,8 @@ def main():
             border-radius: 4px;
         }}
         .red {{ background-color: #ef4444; }}
+        .amber {{ background-color: #f59e0b; }}
+        .violet {{ background-color: #a855f7; }}
         .blue {{ background-color: #3b82f6; }}
         .description {{
             font-size: 0.95rem;
@@ -429,17 +453,25 @@ def main():
         <div class="legend">
             <div class="legend-item">
                 <div class="dot red"></div>
-                <span>Situs Seleksi Positif (p &lt; 0.05)</span>
+                <span>Contrast-FEL: laju berbeda antar klade (q &lt; 0,20)</span>
+            </div>
+            <div class="legend-item">
+                <div class="dot amber"></div>
+                <span>Konsensus seleksi positif (&ge; 2 model situs)</span>
+            </div>
+            <div class="legend-item">
+                <div class="dot violet"></div>
+                <span>Episodik saja (MEME tanpa dukungan pervasif)</span>
             </div>
             <div class="legend-item">
                 <div class="dot blue"></div>
-                <span>Residu Lainnya (Netral / Purifying)</span>
+                <span>Residu lainnya (netral / pemurnian)</span>
             </div>
         </div>
         
         <div class="description">
             <p>Visualisasi 3D protein di atas bersumber dari database <strong>AlphaFold</strong>.
-            Residu berwarna <strong style="color: #ef4444;">merah (stick & cartoon)</strong> menunjukkan situs asam amino yang diidentifikasi mengalami seleksi positif episodik secara signifikan oleh model HyPhy MEME (p &lt; 0.05). Residu berwarna <strong style="color: #3b82f6;">biru (cartoon)</strong> menunjukkan situs netral atau di bawah seleksi negatif.</p>
+            Tiga tingkat bukti dibedakan warnanya dan tidak digabung. <strong style="color: #ef4444;">Merah</strong>: laju non-sinonim berbeda antara klade foreground dan reference menurut Contrast-FEL (q &lt; 0,20) &mdash; klaim terkuat dan paling jarang. <strong style="color: #f59e0b;">Kuning</strong>: seleksi positif yang disepakati sekurang-kurangnya dua model situs (MEME, FEL dengan beta &gt; alpha, FUBAR, SLAC). <strong style="color: #a855f7;">Ungu</strong>: episodik saja &mdash; signifikan menurut MEME tanpa dukungan model pervasif, sehingga buktinya paling lemah. <strong style="color: #3b82f6;">Biru</strong>: netral atau di bawah seleksi pemurnian. Situs yang masuk lebih dari satu kategori diwarnai menurut klaim terkuatnya.</p>
             
             <strong>Daftar Posisi Residu Terseleksi Positif:</strong>
             <div class="site-list">
@@ -475,7 +507,16 @@ def main():
             // Styling default: warna biru untuk cartoon
             viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
             
-            // Styling positive selection: warna merah untuk residu dengan B-factor >= 100.00
+            // Two tiers, matching the B-factors written into the PDB:
+            // amber = consensus positive selection, red = differential (Contrast-FEL).
+            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 20.0 && atom.b < 50.0; }} }}, {{
+                cartoon: {{ color: '#a855f7' }},
+                stick: {{ color: '#a855f7', radius: 0.25 }}
+            }});
+            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 50.0 && atom.b < 100.0; }} }}, {{
+                cartoon: {{ color: '#f59e0b' }},
+                stick: {{ color: '#f59e0b', radius: 0.25 }}
+            }});
             viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }}, {{ 
                 cartoon: {{ color: '#ef4444' }},
                 stick: {{ color: '#ef4444', radius: 0.25 }}
@@ -492,6 +533,10 @@ def main():
                 btn.addEventListener("click", function() {{
                     var resi = parseInt(btn.getAttribute("data-resi"), 10);
                     viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
+                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 20.0 && atom.b < 50.0; }} }},
+                                    {{ cartoon: {{ color: '#a855f7' }}, stick: {{ color: '#a855f7' }} }});
+                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 50.0 && atom.b < 100.0; }} }},
+                                    {{ cartoon: {{ color: '#f59e0b' }}, stick: {{ color: '#f59e0b' }} }});
                     viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }},
                                     {{ cartoon: {{ color: '#ef4444' }}, stick: {{ color: '#ef4444' }} }});
                     viewer.setStyle({{ resi: resi }},
