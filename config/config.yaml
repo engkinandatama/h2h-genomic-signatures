@@ -279,7 +279,15 @@ params:
     # consensus_pos and consensus_neg. It was 1, which meant a single MEME hit
     # produced a "consensus" site while the manuscript stated 2.
     min_methods: 2
-    contrast_fel_fdr: 0.20       # FDR threshold untuk Contrast-FEL (lebih liberal karena test dua arah)
+    contrast_fel_fdr: 0.20
+    # Whether a Contrast-FEL call must also survive HyPhy's permutation test over
+    # branch assignments. The submitted manuscript states only the FDR criterion,
+    # so "no" reproduces exactly what was described. "yes" adds the check HyPhy
+    # computes for this purpose: of the 11 sites reaching q < 0.20 in this study,
+    # none reached p < 0.05 under permutation and six sat at exactly 1.0, several
+    # resting on a single foreground substitution against a background rate
+    # estimated at zero.
+    contrast_fel_require_permutation: "yes"       # FDR threshold untuk Contrast-FEL (lebih liberal karena test dua arah)
 
   # GARD recombination screening. It is by far the most expensive step: the
   # multi-breakpoint phase is a genetic algorithm whose cost grows sharply with

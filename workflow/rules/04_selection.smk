@@ -533,7 +533,8 @@ rule aggregate_all_selection:
         pval=config.get("params", {}).get("hyphy", {}).get("pvalue_threshold", 0.05),
         min_methods=config.get("params", {}).get("hyphy", {}).get("min_methods", 2),
         fubar_pp=config.get("params", {}).get("hyphy", {}).get("fubar_pp_threshold", 0.90),
-        cfdr=config.get("params", {}).get("hyphy", {}).get("contrast_fel_fdr", 0.20)
+        cfdr=config.get("params", {}).get("hyphy", {}).get("contrast_fel_fdr", 0.20),
+        require_perm=config.get("params", {}).get("hyphy", {}).get("contrast_fel_require_permutation", "yes")
     conda:
         "../envs/selection.yaml"
     shell:
@@ -551,6 +552,7 @@ rule aggregate_all_selection:
             --fubar-pp     {params.fubar_pp} \
             --contrast-fdr {params.cfdr} \
             --min-methods  {params.min_methods} \
+            --require-permutation {params.require_perm} \
             --virus-group  {wildcards.virus_group} \
             --protein      {wildcards.protein} \
             --out          {output.full_table} >> {log} 2>&1

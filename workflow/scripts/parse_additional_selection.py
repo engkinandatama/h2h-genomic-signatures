@@ -267,7 +267,7 @@ def _permutation_ok(perm, threshold):
     return value < threshold
 
 
-def parse_contrast_fel(data, pval_thresh, fdr_thresh):
+def parse_contrast_fel(data, pval_thresh, fdr_thresh, require_perm=True):
     """
     Contrast-FEL MLE headers (actual HyPhy output):
       0: alpha               (dS / synonymous rate)
@@ -343,7 +343,8 @@ def parse_contrast_fel(data, pval_thresh, fdr_thresh):
                 # permute a site it writes -1, and that is not evidence either
                 # way, so the q-value stands alone there.
                 "cfel_sig":           (q < fdr_thresh
-                                       and _permutation_ok(perm, pval_thresh)),
+                                       and (not require_perm
+                                            or _permutation_ok(perm, pval_thresh))),
                 "cfel_h2h_stronger":  (
                     isinstance(beta_fg, float) and isinstance(beta_bg, float)
                     and beta_fg > beta_bg and q < fdr_thresh
@@ -527,6 +528,13 @@ def parse_args():
     p.add_argument("--pvalue",       type=float, default=0.05)
     p.add_argument("--fubar-pp",     type=float, default=0.90, dest="fubar_pp")
     p.add_argument("--contrast-fdr", type=float, default=0.20, dest="contrast_fdr")
+    p.add_argument("--require-permutation", dest="require_permutation",
+                   default="yes", choices=["yes", "no"],
+                   type=lambda v: str(v).strip().lower(),
+                   help="Whether a Contrast-FEL call must also survive HyPhy's "
+                        "permutation test. The manuscript as submitted states "
+                        "only the FDR criterion, so 'no' reproduces it; 'yes' "
+                        "adds the check HyPhy computes for exactly this purpose.")
     p.add_argument("--min-methods", type=int, default=2, dest="min_methods",
                    help="Number of site-level methods that must agree before a "
                         "site is called consensus. The manuscript states 2.")
@@ -538,12 +546,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    args.require_permutation = (args.require_permutation == "yes")
 
     meme_res   = parse_meme(load_json(args.meme, "meme"),   args.pvalue)
     fel_res, fel_pos = parse_fel(load_json(args.fel, "fel"), args.pvalue)
     fubar_res  = parse_fubar(load_json(args.fubar, "fubar"), args.fubar_pp)
     slac_res   = parse_slac(load_json(args.slac, "slac"),   args.pvalue)
-    cfel_res   = parse_contrast_fel(load_json(args.contrast_fel, "contrast_fel"), args.pvalue, args.contrast_fdr)
+    cfel_res   = parse_contrast_fel(load_json(args.contrast_fel, "contrast_fel"),
+                                 args.pvalue, args.contrast_fdr,
+                                 args.require_permutation)
     prime_res  = parse_prime(load_json(args.prime, "prime"), args.pvalue)
     gard_warn  = read_gard_warning(args.gard)
 
