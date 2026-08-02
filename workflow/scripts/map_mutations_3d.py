@@ -1,4 +1,5 @@
 import argparse
+import collections
 import os
 import sys
 import urllib.request
@@ -21,6 +22,10 @@ def parse_args():
                         help="Comma-separated boolean columns of the all_sites "
                              "table whose True rows are highlighted. Later names "
                              "win when a site is flagged by more than one.")
+    parser.add_argument("--virus-group", dest="virus_group", default="",
+                        help="Group name, used in the page title and header.")
+    parser.add_argument("--protein", dest="protein", default="",
+                        help="Protein name, used in the page title and header.")
     parser.add_argument("--out_mapping", default="",
                         help="Optional TSV recording alignment column -> UniProt "
                              "residue -> PDB residue for every mapped site")
@@ -317,235 +322,192 @@ def main():
     # Hapus temp file
     if os.path.exists(temp_pdb):
         os.remove(temp_pdb)
-        
-    # 4. Buat viewer HTML statis
-    # Each button carries BOTH coordinates. The manuscript figure previously
-    # showed alignment columns while the accompanying table showed UniProt
-    # residues, so the same site appeared under two numbers 43 apart.
+
+    # 4. Static viewer, matching the layout agreed for the supplementary material.
+    #    The PDB is embedded in a <script type="text/plain"> block and read back
+    #    with .text(), rather than escaped into a JavaScript string literal. A
+    #    coordinate file contains backslashes and quotes; escaping it by hand is
+    #    a source of silent corruption that only shows as an empty viewer.
+    CATEGORY_STYLE = {
+        "cfel_sig":      ("#ef4444", 100.0, "Differential selection between clades (Contrast-FEL)"),
+        "consensus_pos": ("#f59e0b",  60.0, "Positive selection agreed by two or more site models"),
+        "episodic_only": ("#a855f7",  30.0, "Episodic only (MEME, no pervasive support)"),
+    }
+
+    shown = [r for r in sorted(mapping_rows, key=lambda r: r[1]) if r[2] in modelled]
     site_buttons = "".join(
-        f'<button class="site-btn" data-resi="{pdb_res}" '
+        f'<button class="site-btn" data-resi="{pdb_res}" data-category="{category}" '
         f'title="alignment column {col} = UniProt residue {res} ({category})">'
-        f'{res}</button>'
-        for col, res, pdb_res, category in sorted(mapping_rows, key=lambda r: r[1])
-        if pdb_res in modelled) or (
+        f'Site {res}</button>'
+        for col, res, pdb_res, category in shown) or (
         '<span style="opacity:.7">No site could be mapped onto this model.</span>')
 
-    pdb_data_js = "".join(pdb_content).replace("\n", "\\n").replace("\r", "").replace("'", "\\'")
-    
+    counts = collections.Counter(c for _, _, _, c in shown)
+    legend_items = "".join(
+        f'''
+            <div class="legend-item">
+                <span class="dot" style="background: {colour};"></span>
+                <span><b>{label}:</b> {desc} &mdash; {counts.get(cat, 0)} site(s).</span>
+            </div>'''
+        for cat, (colour, _b, desc), label in (
+            ("cfel_sig", CATEGORY_STYLE["cfel_sig"], "Differential"),
+            ("consensus_pos", CATEGORY_STYLE["consensus_pos"], "Consensus"),
+            ("episodic_only", CATEGORY_STYLE["episodic_only"], "Episodic only")))
+
+    style_rules = "\n".join(
+        f"            viewer.addStyle({{ b: {b} }}, {{ cartoon: {{ color: '{colour}' }}, "
+        f"stick: {{ color: '{colour}', radius: 0.3 }} }});"
+        for _cat, (colour, b, _d) in CATEGORY_STYLE.items())
+    style_rules_focus = "\n".join(
+        f"            viewer.addStyle({{ b: {b} }}, {{ cartoon: {{ color: '{colour}' }}, "
+        f"stick: {{ color: '{colour}', radius: 0.2 }} }});"
+        for _cat, (colour, b, _d) in CATEGORY_STYLE.items())
+
+    group_label = (args.virus_group or "").replace("_", " ") or "Virus group"
+    protein_label = (args.protein or "").replace("_", " ") or "Protein"
+    pdb_block = "".join(pdb_content).replace("</", "<\\/")
+
     html_template = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>3D Structure Mapping - {args.uniprot}</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <title>3D Mapping - {args.virus_group} {args.protein}</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
     <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #0f172a;
-            color: #f8fafc;
-            margin: 0;
-            padding: 20px;
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 20px; line-height: 1.6; }}
+        .container {{ max-width: 1000px; margin: 0 auto; background-color: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3); }}
+        h1 {{ color: #38bdf8; margin-top: 0; font-size: 1.8rem; border-bottom: 2px solid #334155; padding-bottom: 10px; }}
+
+        #info_panel {{
+            background: #0f172a; border-left: 5px solid #ef4444; padding: 20px; margin: 20px 0; border-radius: 8px;
+            font-size: 1.2rem; min-height: 60px; display: flex; align-items: center; justify-content: center;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
         }}
-        .container {{
-            max-width: 1000px;
-            margin: 0 auto;
-            background-color: #1e293b;
-            padding: 24px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-        }}
-        h1 {{
-            font-size: 1.8rem;
-            margin-top: 0;
-            color: #38bdf8;
-        }}
-        .meta-info {{
-            font-size: 0.95rem;
-            color: #94a3b8;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #334155;
-            padding-bottom: 10px;
-        }}
-        #viewer {{
-            width: 100%;
-            height: 550px;
-            position: relative;
-            background-color: #0b0f19;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid #475569;
-        }}
-        .site-strip {{
-            margin: 12px 0;
-            padding: 12px;
-            background-color: #0f172a;
-            border-radius: 8px;
-        }}
+
+        #viewer_container {{ position: relative; width: 100%; height: 550px; background-color: #0b0f19; border-radius: 10px; border: 1px solid #475569; margin-bottom: 25px; }}
+        #viewer {{ width: 100%; height: 100%; }}
+
+        .legend {{ display: flex; flex-direction: column; gap: 10px; margin: 20px 0; padding: 15px; background: #0f172a; border-radius: 8px; }}
+        .legend-item {{ display: flex; align-items: center; gap: 10px; font-size: 0.95rem; }}
+        .dot {{ width: 16px; height: 16px; border-radius: 4px; display: inline-block; flex: none; }}
+
+        .section-title {{ color: #38bdf8; font-weight: bold; font-size: 1.1rem; margin-bottom: 10px; display: block; }}
+        .description-box {{ background: #0f172a; padding: 20px; border-radius: 8px; margin-top: 25px; color: #cbd5e1; font-size: 0.95rem; }}
+
+        .site-list {{ background-color: #0f172a; padding: 15px; border-radius: 8px; max-height: 180px; overflow-y: auto; border: 1px solid #334155; display: flex; flex-wrap: wrap; gap: 8px; }}
         .site-btn {{
-            background-color: #1e40af;
-            color: #f8fafc;
-            border: 1px solid #3b82f6;
-            border-radius: 4px;
-            padding: 4px 9px;
-            margin: 2px;
-            cursor: pointer;
-            font-size: 13px;
+            background: #1e293b; color: #38bdf8; border: 1px solid #38bdf8; padding: 6px 14px; border-radius: 6px;
+            cursor: pointer; font-weight: bold; transition: all 0.2s; font-size: 0.9rem;
         }}
-        .site-btn:hover {{ background-color: #2563eb; }}
-        .legend {{
-            display: flex;
-            gap: 24px;
-            margin: 20px 0;
-            background-color: #0f172a;
-            padding: 12px 16px;
-            border-radius: 6px;
-            border-left: 4px solid #38bdf8;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.9rem;
-        }}
-        .dot {{
-            width: 14px;
-            height: 14px;
-            border-radius: 4px;
-        }}
-        .red {{ background-color: #ef4444; }}
-        .amber {{ background-color: #f59e0b; }}
-        .violet {{ background-color: #a855f7; }}
-        .blue {{ background-color: #3b82f6; }}
-        .description {{
-            font-size: 0.95rem;
-            line-height: 1.6;
-            color: #cbd5e1;
-        }}
-        .site-list {{
-            background-color: #0f172a;
-            padding: 12px;
-            border-radius: 6px;
-            max-height: 100px;
-            overflow-y: auto;
-            font-family: monospace;
-            color: #38bdf8;
-            margin-top: 10px;
-        }}
+        .site-btn:hover {{ background: #38bdf8; color: #0f172a; transform: translateY(-2px); }}
+        .site-btn.active {{ background: #facc15; color: #0f172a; border-color: #facc15; box-shadow: 0 0 10px rgba(250, 204, 21, 0.4); }}
+
+        b {{ color: #f8fafc; }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>3D Mapping of Positive Selection Sites</h1>
-        <div class="meta-info">
-            <strong>UniProt ID:</strong> {args.uniprot} | 
-            <strong>Jumlah Residu Terseleksi:</strong> {len(positive_sites)}
+        <h1>3D Structural Mapping: {group_label}</h1>
+
+        <div style="margin-bottom: 20px; font-size: 1rem; color: #94a3b8;">
+            <b>Virus Group:</b> {group_label} &nbsp;|&nbsp;
+            <b>Protein:</b> {protein_label} &nbsp;|&nbsp;
+            <b>UniProt ID:</b> <a href="https://www.uniprot.org/uniprotkb/{args.uniprot}" target="_blank" style="color: #38bdf8;">{args.uniprot}</a>
         </div>
-        
-        <div class="site-strip">
-            <div style="margin-bottom:8px; font-weight:600;">
-                Mapped sites (UniProt numbering; hover for the alignment column):
-            </div>
-            {site_buttons}
+
+        <div id="info_panel">
+            <span id="info_content" style="color: #94a3b8;"><i>Select a site below to begin structural inspection</i></span>
         </div>
-        <div id="viewer"></div>
-        
-        <div class="legend">
+
+        <div id="viewer_container">
+            <div id="viewer"></div>
+        </div>
+
+        <div class="legend">{legend_items}
             <div class="legend-item">
-                <div class="dot red"></div>
-                <span>Contrast-FEL: laju berbeda antar klade (q &lt; 0,20)</span>
-            </div>
-            <div class="legend-item">
-                <div class="dot amber"></div>
-                <span>Konsensus seleksi positif (&ge; 2 model situs)</span>
-            </div>
-            <div class="legend-item">
-                <div class="dot violet"></div>
-                <span>Episodik saja (MEME tanpa dukungan pervasif)</span>
-            </div>
-            <div class="legend-item">
-                <div class="dot blue"></div>
-                <span>Residu lainnya (netral / pemurnian)</span>
+                <span class="dot" style="background: #3b82f6;"></span>
+                <span><b>Other residues:</b> protein backbone, neutral or under purifying selection.</span>
             </div>
         </div>
-        
-        <div class="description">
-            <p>Visualisasi 3D protein di atas bersumber dari database <strong>AlphaFold</strong>.
-            Tiga tingkat bukti dibedakan warnanya dan tidak digabung. <strong style="color: #ef4444;">Merah</strong>: laju non-sinonim berbeda antara klade foreground dan reference menurut Contrast-FEL (q &lt; 0,20) &mdash; klaim terkuat dan paling jarang. <strong style="color: #f59e0b;">Kuning</strong>: seleksi positif yang disepakati sekurang-kurangnya dua model situs (MEME, FEL dengan beta &gt; alpha, FUBAR, SLAC). <strong style="color: #a855f7;">Ungu</strong>: episodik saja &mdash; signifikan menurut MEME tanpa dukungan model pervasif, sehingga buktinya paling lemah. <strong style="color: #3b82f6;">Biru</strong>: netral atau di bawah seleksi pemurnian. Situs yang masuk lebih dari satu kategori diwarnai menurut klaim terkuatnya.</p>
-            
-            <strong>Daftar Posisi Residu Terseleksi Positif:</strong>
-            <div class="site-list">
-                {", ".join(map(str, sorted(positive_sites))) if positive_sites else "Tidak ada situs yang terseleksi positif."}
-            </div>
+
+        <span class="section-title">Interactive Site Inspection:</span>
+        <div class="site-list">{site_buttons}</div>
+
+        <div class="description-box">
+            <span class="section-title" style="color: #f8fafc;">About this Visualization:</span>
+            <p>This interactive viewer maps sites under positive selection onto a 3D protein
+            structure. Three tiers of evidence are drawn in separate colours rather than merged,
+            so a site is never shown as better supported than the underlying tables allow. A site
+            flagged by more than one test takes the colour of its strongest claim.</p>
+
+            <p><b>Differential</b> sites have significantly different non-synonymous rates between
+            the foreground and reference clades. <b>Consensus</b> sites are called under positive
+            selection by at least two independent site models. <b>Episodic only</b> sites are
+            significant under MEME alone, with no support from the pervasive models, and are the
+            weakest of the three.</p>
+
+            <p>Residue numbering follows the <b>UniProt</b> entry, not the alignment column, and the
+            two differ wherever the reference carries a gap. Each button's tooltip gives both.
+            Where the deposited model covers only part of the protein, sites outside the modelled
+            region cannot be shown and are listed in the accompanying coordinate map.</p>
+
+            <p style="font-size: 0.85rem; border-top: 1px solid #334155; padding-top: 10px; margin-top: 15px;">
+                <b>Controls:</b> Left-click to Rotate | Right-click to Pan | Scroll to Zoom | Click buttons above to auto-focus.
+            </p>
         </div>
     </div>
 
+    <script type="text/plain" id="pdb_data">{pdb_block}</script>
     <script>
-        document.addEventListener("DOMContentLoaded", function() {{
-            let element = document.getElementById("viewer");
-            
-            // Cek apakah pustaka 3Dmol berhasil dimuat dari CDN.
-            // NOTE: "3Dmol" is not a legal JavaScript identifier (a numeral cannot
-            // start one), so `typeof 3Dmol` is a parse error that kills the whole
-            // script block. The library exposes itself as $3Dmol; when loaded via
-            // a plain <script> tag it is also reachable as window["3Dmol"].
-            var mol3D = (typeof $3Dmol !== "undefined") ? $3Dmol : window["3Dmol"];
-            if (!mol3D) {{
-                element.innerHTML = '<div style="color: #f87171; padding: 40px; text-align: center; font-weight: bold; font-family: system-ui, sans-serif; line-height: 1.6; margin-top: 150px;">' +
-                    '<span style="font-size: 24px;">Gagal Memuat Visualisasi 3D</span><br><br>' +
-                    'Pustaka visualisasi 3D (3Dmol.js) tidak dapat diunduh dari CDN.<br>' +
-                    'Harap hubungkan komputer Anda ke internet, atau periksa apakah ekstensi penolak iklan (Ad-blocker) / firewall memblokir cdnjs.cloudflare.com.' +
-                    '</div>';
+        var viewer;
+
+        function baseStyle(opacity) {{
+            viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6', opacity: opacity }} }});
+        }}
+
+        function zoomToSite(resi) {{
+            let spec = {{ resi: parseInt(resi) }};
+            viewer.zoomTo(spec, 1000);
+
+            baseStyle(0.5);
+{style_rules_focus}
+            viewer.addStyle(spec, {{ stick: {{ color: '#facc15', radius: 0.5 }}, sphere: {{ color: '#facc15', radius: 1.0 }} }});
+
+            let atoms = viewer.getModel().selectedAtoms(spec);
+            if (atoms.length > 0) {{
+                let a = atoms.find(x => x.name === 'CA') || atoms[0];
+                let btn = $(".site-btn[data-resi='" + resi + "']");
+                let cat = btn.data("category") || "";
+                let infoHtml = "<b style='color: #facc15;'>Inspecting Site " + resi + "</b> &nbsp;|&nbsp; " +
+                               "<b>Residue:</b> " + a.resn + " &nbsp;|&nbsp; " +
+                               "<b>Evidence:</b> " + cat;
+                $("#info_content").html(infoHtml).css("color", "#f8fafc");
+
+                viewer.removeAllLabels();
+                viewer.addLabel("Site " + resi, {{ fontSize: 14, fontColor: '#0f172a', backgroundColor: '#facc15', position: {{ x: a.x, y: a.y, z: a.z }} }});
+            }}
+            viewer.render();
+        }}
+
+        $(function() {{
+            if (typeof window["$3Dmol"] === "undefined") {{
+                $("#info_content").html("<b>3Dmol.js could not be loaded from the CDN. " +
+                    "The structure cannot be displayed offline.</b>").css("color", "#ef4444");
                 return;
             }}
-            let viewer = mol3D.createViewer(element, {{}});
-            
-            let pdbData = '{pdb_data_js}';
-            
-            viewer.addModel(pdbData, "pdb");
-            
-            // Styling default: warna biru untuk cartoon
-            viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
-            
-            // Two tiers, matching the B-factors written into the PDB:
-            // amber = consensus positive selection, red = differential (Contrast-FEL).
-            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 20.0 && atom.b < 50.0; }} }}, {{
-                cartoon: {{ color: '#a855f7' }},
-                stick: {{ color: '#a855f7', radius: 0.25 }}
-            }});
-            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 50.0 && atom.b < 100.0; }} }}, {{
-                cartoon: {{ color: '#f59e0b' }},
-                stick: {{ color: '#f59e0b', radius: 0.25 }}
-            }});
-            viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }}, {{ 
-                cartoon: {{ color: '#ef4444' }},
-                stick: {{ color: '#ef4444', radius: 0.25 }}
-            }});
-            
+            viewer = $3Dmol.createViewer($("#viewer"), {{ backgroundColor: '#0b0f19' }});
+            viewer.addModel($("#pdb_data").text(), "pdb");
+            baseStyle(0.8);
+{style_rules}
             viewer.zoomTo();
             viewer.render();
 
-            // Focus a residue when its button is clicked. selectedAtoms() is the
-            // 3Dmol API; an earlier revision called getAtoms(), which does not
-            // exist in the library and threw before render() was reached, so
-            // clicking a site appeared to do nothing.
-            document.querySelectorAll(".site-btn").forEach(function(btn) {{
-                btn.addEventListener("click", function() {{
-                    var resi = parseInt(btn.getAttribute("data-resi"), 10);
-                    viewer.setStyle({{}}, {{ cartoon: {{ color: '#3b82f6' }} }});
-                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 20.0 && atom.b < 50.0; }} }},
-                                    {{ cartoon: {{ color: '#a855f7' }}, stick: {{ color: '#a855f7' }} }});
-                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 50.0 && atom.b < 100.0; }} }},
-                                    {{ cartoon: {{ color: '#f59e0b' }}, stick: {{ color: '#f59e0b' }} }});
-                    viewer.setStyle({{ predicate: function(atom) {{ return atom.b >= 100.0; }} }},
-                                    {{ cartoon: {{ color: '#ef4444' }}, stick: {{ color: '#ef4444' }} }});
-                    viewer.setStyle({{ resi: resi }},
-                                    {{ sphere: {{ color: '#facc15', radius: 1.2 }} }});
-                    viewer.zoomTo({{ resi: resi }});
-                    viewer.render();
-                }});
+            $(".site-btn").click(function() {{
+                $(".site-btn").removeClass("active");
+                $(this).addClass("active");
+                zoomToSite($(this).data("resi"));
             }});
-            viewer.setBackgroundColor('#0b0f19');
         }});
     </script>
 </body>

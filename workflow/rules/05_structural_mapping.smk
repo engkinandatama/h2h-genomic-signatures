@@ -44,6 +44,8 @@ rule map_structure:
             --uniprot {params.uniprot_id} \
             --selection {input.selection_results} \
             --alignment {input.codon_aln} \
+            --virus-group {wildcards.virus_group} \
+            --protein {wildcards.protein} \
             --out_mapping {output.mapping} \
             --out_pdb {output.mapped_pdb} \
             --out_html {output.html_view} >> {log} 2>&1
