@@ -40,17 +40,54 @@ def load_json(path):
         return None
 
 
+def _improvement_stages(improvements):
+    """
+    GARD writes 'improvements' as a dict keyed by stage index, not a list.
+
+    The keys are the strings "0", "1", ... and each value holds that stage's
+    incremental deltaAICc and the breakpoint set found at it. Iterating the dict
+    directly yields those key strings, so a loop written for a list of records
+    never matches anything and silently reports no recombination -- which is what
+    this parser did for every dataset, including alignments whose own GARD log
+    named the breakpoints it had found.
+    """
+    if isinstance(improvements, dict):
+        return [improvements[k] for k in sorted(improvements, key=lambda x: int(x))]
+    if isinstance(improvements, list):
+        return list(improvements)
+    return []
+
+
+def _flatten_breakpoints(bps):
+    """HyPhy matrices serialise as nested lists: [[5138]] or [[5097], [5636]]."""
+    out = []
+    if not bps:
+        return out
+    for item in bps if isinstance(bps, list) else [bps]:
+        if isinstance(item, list):
+            out.extend(int(float(x)) for x in item)
+        else:
+            out.append(int(float(item)))
+    return out
+
+
 def parse_gard(data):
     """
     Extract recombination summary from GARD JSON.
 
     Returns dict with:
-      status                  : 'OK' | 'FAILED'
-      recombination_detected  : bool, or 'NA' when status is FAILED
+      status                  : 'OK' | 'FAILED' | 'SKIPPED'
+      recombination_detected  : bool, or 'NA' when not OK
       n_breakpoints           : int or 'NA'
-      breakpoint_positions    : str  (comma-separated column positions)
-      max_c_aic_improvement   : float or 'NA'
-      gard_aic                : float or 'NA'
+      breakpoint_positions    : str  (comma-separated alignment columns)
+      delta_aicc_vs_baseline  : float or 'NA'
+      baseline_aicc           : float or 'NA'
+      best_model_aicc         : float or 'NA'
+
+    The breakpoint count comes from 'breakpointData', which holds one entry per
+    partition of the best model and is therefore one longer than the number of
+    breakpoints. That is the model GARD actually settled on, so it is preferred
+    over re-deriving the count from the improvement stages.
 
     A failed run and a genuine "no breakpoints" result must never look alike: an
     empty or sentinel JSON yields status=FAILED with recombination_detected='NA',
@@ -61,14 +98,13 @@ def parse_gard(data):
         "recombination_detected": False,
         "n_breakpoints": 0,
         "breakpoint_positions": "None",
-        "max_c_aic_improvement": "NA",
-        "gard_aic": "NA",
+        "delta_aicc_vs_baseline": "NA",
+        "baseline_aicc": "NA",
+        "best_model_aicc": "NA",
     }
     failed = dict(result, status="FAILED", recombination_detected="NA",
                   n_breakpoints="NA")
 
-    # Empty dict, missing file, or the {"status": "FAILED"} sentinel written by the
-    # GARD rule when HyPhy exits non-zero.
     if data and data.get("status") == "SKIPPED":
         # Not screened because compute was the constraint. Distinct from FAILED so
         # the Methods can say how many alignments were screened and how many were
@@ -77,35 +113,38 @@ def parse_gard(data):
     if not data or data.get("status") == "FAILED":
         return failed
 
-    improvements = data.get("improvements", [])
-    if not improvements:
-        # GARD ran but reported no improvements section at all: treat as unusable
+    if "improvements" not in data:
+        # GARD ran but wrote no improvements section at all: treat as unusable
         # rather than as evidence of no recombination.
         return failed
 
-    # Filter to actual breakpoints (c-AIC improvement > 0)
-    breakpoints = [
-        imp for imp in improvements
-        if isinstance(imp, dict) and imp.get("c-AIC improvement", 0) > 0
-    ]
+    for key, field in (("baselineScore", "baseline_aicc"),
+                       ("bestModelAICc", "best_model_aicc")):
+        if data.get(key) is not None:
+            result[field] = round(float(data[key]), 4)
+    if result["baseline_aicc"] != "NA" and result["best_model_aicc"] != "NA":
+        result["delta_aicc_vs_baseline"] = round(
+            result["baseline_aicc"] - result["best_model_aicc"], 4)
 
-    if not breakpoints:
+    partitions = data.get("breakpointData") or {}
+    stages = _improvement_stages(data.get("improvements"))
+    positions = []
+    for stage in reversed(stages):
+        positions = _flatten_breakpoints(
+            stage.get("breakpoints") if isinstance(stage, dict) else None)
+        if positions:
+            break
+
+    n_from_partitions = max(len(partitions) - 1, 0) if partitions else None
+    n_breakpoints = n_from_partitions if n_from_partitions is not None else len(positions)
+
+    if n_breakpoints == 0:
         return result
 
     result["recombination_detected"] = True
-    result["n_breakpoints"] = len(breakpoints)
-    result["breakpoint_positions"] = ",".join(
-        str(int(bp.get("breakpoint", 0))) for bp in breakpoints
-    )
-    improvements_vals = [bp.get("c-AIC improvement", 0) for bp in breakpoints]
-    result["max_c_aic_improvement"] = round(max(improvements_vals), 4)
-
-    # GARD AIC from model section
-    gard_model = data.get("GARD model", {})
-    aic = gard_model.get("AIC-c", None)
-    if aic is not None:
-        result["gard_aic"] = round(float(aic), 4)
-
+    result["n_breakpoints"] = n_breakpoints
+    if positions:
+        result["breakpoint_positions"] = ",".join(str(p) for p in sorted(positions))
     return result
 
 
@@ -128,7 +167,8 @@ def main():
     header = [
         "virus_group", "protein", "status",
         "recombination_detected", "n_breakpoints",
-        "breakpoint_positions", "max_c_aic_improvement", "gard_aic",
+        "breakpoint_positions", "delta_aicc_vs_baseline",
+        "baseline_aicc", "best_model_aicc",
     ]
     row = {
         "virus_group": args.virus_group,
@@ -154,7 +194,7 @@ def main():
     elif detected:
         print("  [WARNING] RECOMBINATION DETECTED")
         print(f"  Breakpoints : {result['n_breakpoints']} at positions [{result['breakpoint_positions']}]")
-        print(f"  Max cAIC improvement : {result['max_c_aic_improvement']}")
+        print(f"  cAIC improvement over the single-partition model : {result['delta_aicc_vs_baseline']}")
         print("  Downstream selection analyses may have inflated false positive rates.")
         print("  Consider using only the largest non-recombinant segment.")
     else:

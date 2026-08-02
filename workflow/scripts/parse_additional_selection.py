@@ -400,13 +400,16 @@ def read_gard_warning(gard_summary_path):
         return False
     try:
         with open(gard_summary_path) as f:
-            f.readline()  # skip header
-            line = f.readline().strip()
+            header = f.readline().rstrip("\n").split("\t")
+            line = f.readline().rstrip("\n")
             if not line:
                 return False
-            parts = line.split("\t")
-            # recombination_detected is column index 2
-            return parts[2].strip().lower() == "true" if len(parts) > 2 else False
+            # Look the column up by name. This used to index position 2, which
+            # stopped being recombination_detected the moment a status column was
+            # added in front of it, so the test compared "OK" against "true" and
+            # every alignment reported no recombination.
+            row = dict(zip(header, line.split("\t")))
+            return row.get("recombination_detected", "").strip().lower() == "true"
     except Exception:
         return False
 
