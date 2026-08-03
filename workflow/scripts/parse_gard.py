@@ -25,6 +25,7 @@ Output TSV columns:
 
 import argparse
 import json
+import re
 import os
 import sys
 
@@ -38,6 +39,47 @@ def load_json(path):
     except Exception as e:
         print(f"Warning: cannot read {path}: {e}", file=sys.stderr)
         return None
+
+
+def salvage_from_log(log_path):
+    """
+    Recover the last completed breakpoint stage from a crashed GARD run.
+
+    GARD reports each stage to its log as it finishes, then writes JSON only at
+    the very end. A numerical failure late in the search therefore discards
+    everything the search had already established -- Marburg L had found two
+    breakpoints and cut c-AIC by 476 units before HyPhy aborted on a likelihood
+    checkpoint mismatch in the three-breakpoint stage.
+
+    What is recovered is a lower bound: at least these breakpoints, possibly
+    more had the run finished. It is reported as status PARTIAL, never as OK.
+    """
+    if not log_path or not os.path.exists(log_path):
+        return None
+    try:
+        text = open(log_path, errors="replace").read()
+    except OSError:
+        return None
+
+    multi = re.findall(r"Best break point locations:\s*([0-9,\s]+)\s*\n\s*c-AIC\s*=\s*([0-9.eE+-]+)",
+                       text)
+    single = re.findall(r"Best single break point location:\s*(\d+)\s*\n\s*c-AIC\s*=\s*([0-9.eE+-]+)",
+                        text)
+    baseline = re.findall(r"AIC-c\s*=\s*([0-9.eE+-]+)\s*\(", text)
+
+    if multi:
+        positions = [int(x) for x in multi[-1][0].replace(" ", "").split(",") if x]
+        best = float(multi[-1][1])
+    elif single:
+        positions = [int(single[-1][0])]
+        best = float(single[-1][1])
+    else:
+        return None
+
+    out = {"positions": sorted(positions), "best_aicc": best}
+    if baseline:
+        out["baseline_aicc"] = float(baseline[0])
+    return out
 
 
 def _improvement_stages(improvements):
@@ -71,7 +113,7 @@ def _flatten_breakpoints(bps):
     return out
 
 
-def parse_gard(data):
+def parse_gard(data, log_path=None):
     """
     Extract recombination summary from GARD JSON.
 
@@ -111,6 +153,30 @@ def parse_gard(data):
         # not, and distinct from a clean negative in either case.
         return dict(failed, status="SKIPPED")
     if not data or data.get("status") == "FAILED":
+        rescued = salvage_from_log(log_path)
+        # A stage is only evidence of recombination if its model beat the
+        # single-partition baseline. GARD reports the best breakpoint it could
+        # find at each stage even when that model is worse, and Nipah Malaysia L
+        # crashed with a best single breakpoint whose c-AIC was 22 units WORSE
+        # than no breakpoint at all. Reporting that as a breakpoint would invent
+        # recombination out of a failed search.
+        if rescued and "baseline_aicc" in rescued:
+            if rescued["baseline_aicc"] - rescued["best_aicc"] <= 0:
+                rescued = {"positions": [], "best_aicc": rescued["best_aicc"],
+                           "baseline_aicc": rescued["baseline_aicc"]}
+        if rescued:
+            partial = dict(result, status="PARTIAL")
+            partial["n_breakpoints"] = len(rescued["positions"])
+            partial["recombination_detected"] = bool(rescued["positions"])
+            partial["breakpoint_positions"] = (
+                ",".join(str(p) for p in rescued["positions"])
+                if rescued["positions"] else "None")
+            partial["best_model_aicc"] = round(rescued["best_aicc"], 4)
+            if "baseline_aicc" in rescued:
+                partial["baseline_aicc"] = round(rescued["baseline_aicc"], 4)
+                partial["delta_aicc_vs_baseline"] = round(
+                    rescued["baseline_aicc"] - rescued["best_aicc"], 4)
+            return partial
         return failed
 
     if "improvements" not in data:
@@ -154,13 +220,17 @@ def parse_args():
     p.add_argument("--out",         required=True, help="Output summary text file")
     p.add_argument("--virus-group", required=True, dest="virus_group")
     p.add_argument("--protein",     required=True)
+    p.add_argument("--log", default="",
+                   help="GARD console log. When HyPhy crashes mid-search, the "
+                        "last completed stage is recovered from it and reported "
+                        "as PARTIAL rather than discarded.")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     data = load_json(args.json)
-    result = parse_gard(data)
+    result = parse_gard(data, args.log)
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
@@ -187,6 +257,12 @@ def main():
     if result["status"] == "SKIPPED":
         print("  [SKIPPED] Not screened (params.gard.skip_datasets).")
         print("  Recombination status is UNKNOWN for this alignment.")
+    elif result["status"] == "PARTIAL":
+        print("  [PARTIAL] GARD crashed before finishing its search.")
+        print(f"  At least {result['n_breakpoints']} breakpoint(s) at "
+              f"[{result['breakpoint_positions']}] were established first.")
+        print("  Treat this as a lower bound: more may exist. Do not report it as a")
+        print("  completed screen.")
     elif result["status"] == "FAILED":
         print("  [FAILED] GARD produced no usable output.")
         print("  Recombination status is UNKNOWN for this alignment. Do not report this")

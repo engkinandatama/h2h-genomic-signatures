@@ -44,7 +44,8 @@ rule hyphy_gard:
                 --json    {output.json} \
                 --out     {output.summary} \
                 --virus-group {wildcards.virus_group} \
-                --protein {wildcards.protein} >> {log} 2>&1
+                --protein {wildcards.protein} \
+            --log {log} >> {log} 2>&1
             exit 0
         fi
 
@@ -57,7 +58,8 @@ rule hyphy_gard:
                 --json    {output.json} \
                 --out     {output.summary} \
                 --virus-group {wildcards.virus_group} \
-                --protein {wildcards.protein} >> {log} 2>&1
+                --protein {wildcards.protein} \
+            --log {log} >> {log} 2>&1
             exit 0
         fi
 
@@ -72,7 +74,8 @@ rule hyphy_gard:
                 --json    {output.json} \
                 --out     {output.summary} \
                 --virus-group {wildcards.virus_group} \
-                --protein {wildcards.protein} >> {log} 2>&1
+                --protein {wildcards.protein} \
+            --log {log} >> {log} 2>&1
             exit 0
         fi
 
@@ -98,7 +101,8 @@ rule hyphy_gard:
             --json    {output.json} \
             --out     {output.summary} \
             --virus-group {wildcards.virus_group} \
-            --protein {wildcards.protein} >> {log} 2>&1
+            --protein {wildcards.protein} \
+            --log {log} >> {log} 2>&1
 
         echo "GARD complete for {wildcards.virus_group} - {wildcards.protein}." >> {log}
         """
