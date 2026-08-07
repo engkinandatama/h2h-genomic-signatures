@@ -64,11 +64,11 @@ REPLACEMENTS = {
  "sequence sets than are presently available."],
 
 56: [
- "Maximum-likelihood phylogenetic trees were reconstructed using IQ-TREE v2 with automatic "
- "model selection via ModelFinder and 1000 ultrafast bootstrap replicates (-m TEST -B "
- "1000). Branches with bootstrap support below 70 were collapsed into polytomies. All "
- "codon alignments were screened for recombination breakpoints using GARD implemented in "
- "HyPhy. Screening completed on 15 of the 18 alignments; two terminated on an internal "
+ "Maximum-likelihood phylogenetic trees were reconstructed using IQ-TREE v2 {{C1}} with "
+ "automatic model selection via ModelFinder {{C2}} and 1000 ultrafast bootstrap replicates "
+ "(-m TEST -B 1000). Branches with bootstrap support below 70 were collapsed into "
+ "polytomies. All codon alignments were screened for recombination breakpoints using GARD "
+ "{{C3}} implemented in HyPhy {{C4}}. Screening completed on 15 of the 18 alignments; two terminated on an internal "
  "numerical error after establishing part of the search and are reported as partial, and "
  "one was not screened because of its computational cost. Detected breakpoints are "
  "reported alongside the selection results, and the proximity of each differential site to "
@@ -126,8 +126,10 @@ REPLACEMENTS = {
  "(15 sites, 6 lineages, 3 families; 0.610; p = 0.930, q = 0.930), which serves as an "
  "internal negative control: a displacement present in both roles would indicate the "
  "site-selection rule or the alignment geometry rather than a property of entry proteins. "
- "This analysis was performed post hoc, after the bin co-occurrence test proved "
- "underpowered, and is reported as such."],
+ "The solvent-exposed N-terminal region of viral entry glycoproteins has been described as "
+ "structurally permissive {{C1}}, which is consistent with this displacement although we "
+ "did not test that mechanism here. This analysis was performed post hoc, after the bin "
+ "co-occurrence test proved underpowered, and is reported as such."],
 
 337: [
  "No protein domain was enriched for adaptive sites after correction for multiple testing. "
@@ -147,12 +149,12 @@ REPLACEMENTS = {
 341: [
  "The mechanism of human-to-human adaptation is lineage-specific and reflects the receptor "
  "biology of each viral family. In henipaviruses, positive selection at discrete entry "
- "residues is accompanied by a dual-property signal at polymerase site L210, where "
+ "residues is accompanied by a dual-property signal at polymerase site L210 {{C1}}, where "
  "hydrophobicity is conserved and isoelectric point diversifies (p = 0.015 and p = 0.017; "
  "omnibus p = 0.031). It is the only site in this alignment with any significant "
  "physicochemical property, but it does not survive correction across the alignment "
  "(omnibus q = 1.0) and is therefore a candidate rather than an established finding. In "
- "hantaviruses, fluid-phase macropinocytic entry combined with the use of conserved "
+ "hantaviruses, fluid-phase macropinocytic entry {{C2}} combined with the use of conserved "
  "cellular receptors such as PCDH1 may pre-adapt Andes virus to human cells without "
  "requiring host-specific receptor optimisation. We note that the relaxation parameters "
  "previously cited in support of an entry-relaxed and polymerase-intensified dichotomy do "
@@ -229,6 +231,34 @@ INSERTIONS = {
 }
 
 
+def citation_fields(para):
+    """
+    The complete Zotero field sequences in this paragraph, in order.
+
+    A field runs from a fldChar of type begin to one of type end, spanning the
+    instrText that carries the CSL payload and the runs that display the
+    formatted citation. Lifting the whole span keeps the field live, so Word and
+    Zotero still recognise it after the surrounding prose is rewritten.
+    """
+    runs = re.findall(r"<w:r>.*?</w:r>|<w:r [^>]*>.*?</w:r>", para, re.S)
+    fields, cur, depth = [], [], 0
+    for r in runs:
+        if 'w:fldCharType="begin"' in r:
+            depth += 1
+        if depth:
+            cur.append(r)
+        if 'w:fldCharType="end"' in r and depth:
+            depth -= 1
+            if not depth:
+                fields.append("".join(cur)); cur = []
+    # recolour only the displayed citation text, never the field code
+    out = []
+    for f in fields:
+        f = re.sub(r"(<w:rPr>)(?![^<]*fldChar)", r'\1<w:color w:val="%s"/>' % BLUE, f)
+        out.append(f)
+    return out
+
+
 def cell(text, header=False, width=0):
     shade = '<w:shd w:val="clear" w:color="auto" w:fill="EDF3FA"/>' if header else ""
     bold = "<w:b/>" if header else ""
@@ -292,11 +322,24 @@ def strike_paragraph(p, text_only=False):
     return p
 
 
-def blue_paragraph(text):
-    return ('<w:p><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr>'
-            f'<w:r><w:rPr><w:color w:val="{BLUE}"/><w:sz w:val="22"/>'
+def blue_run(text):
+    return (f'<w:r><w:rPr><w:color w:val="{BLUE}"/><w:sz w:val="22"/>'
             f'<w:szCs w:val="22"/></w:rPr>'
-            f'<w:t xml:space="preserve">{esc(text)}</w:t></w:r></w:p>')
+            f'<w:t xml:space="preserve">{esc(text)}</w:t></w:r>')
+
+
+def blue_paragraph(text, fields=()):
+    """Blue prose, with {{Cn}} markers replaced by live citation fields."""
+    body = []
+    for part in re.split(r"(\{\{C\d+\}\})", text):
+        m = re.fullmatch(r"\{\{C(\d+)\}\}", part)
+        if m:
+            i = int(m.group(1)) - 1
+            body.append(fields[i] if i < len(fields) else blue_run(""))
+        elif part:
+            body.append(blue_run(part))
+    return ('<w:p><w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr>'
+            + "".join(body) + "</w:p>")
 
 
 def rescale_drawings(xml, rid, w, h):
@@ -329,8 +372,9 @@ def main(src, dst):
             out.append(blue_paragraph(TABLE_CAPTIONS[i])); n_cap += 1
         elif i in REPLACEMENTS or i in CAPTIONS:
             out.append(strike_paragraph(para, text_only=i in TEXT_ONLY_STRIKE))
+            fields = citation_fields(para)
             for t in REPLACEMENTS.get(i, []):
-                out.append(blue_paragraph(t))
+                out.append(blue_paragraph(t, fields))
             if i in CAPTIONS:
                 out.append(blue_paragraph(CAPTIONS[i])); n_cap += 1
             if i in REPLACEMENTS:
