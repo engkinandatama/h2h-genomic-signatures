@@ -174,6 +174,21 @@ def parse_relax(data):
         "relax_sig": bool
       }
     """
+    # A sentinel is not a null result. NOT_APPLICABLE means the group has no
+    # reservoir comparator and the test could not be posed; FAILED means HyPhy
+    # crashed and the answer is unknown. Both used to arrive here as "NA",
+    # indistinguishable from each other and from a test that ran and found
+    # nothing -- Puumala GnGc crashed and was reported exactly as Ebola, whose
+    # analysis was never applicable.
+    status = (data or {}).get("status") if isinstance(data, dict) else None
+    if status:
+        return {
+            "relax_k": status,
+            "relax_pvalue": "NA",
+            "relax_direction": status,
+            "relax_sig": False,
+        }
+
     result = {
         "relax_k": "NA",
         "relax_pvalue": "NA",
