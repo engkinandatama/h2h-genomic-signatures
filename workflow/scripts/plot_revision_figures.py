@@ -61,7 +61,7 @@ groups = sorted(sites, key=lambda g: (FAM_ORDER.index(FAM[g]), klass(g), g))
 rate   = {g: 1000 * sites[g][0] / sites[g][1] for g in groups}
 
 # ---------------------------------------------------------------- Figure 1
-fig, ax = plt.subplots(figsize=(7.2, 3.4))
+fig, ax = plt.subplots(figsize=(6.70, 3.284))   # matches Figure 1 extent
 x = np.arange(len(groups)); w = 0.62
 cols = [BLUE if klass(g) == "H2H-capable" else ORANGE for g in groups]
 bars = ax.bar(x, [rate[g] for g in groups], w, color=cols, linewidth=0, zorder=3)
@@ -108,7 +108,7 @@ fig.savefig(f"{OUT}/Figure1_H2H_vs_spillover_rate.png")
 plt.close(fig)
 
 # ---------------------------------------------------------------- Figure 2
-fig, ax = plt.subplots(figsize=(7.2, 2.6))
+fig, ax = plt.subplots(figsize=(6.70, 3.304))   # matches Figure 4 extent
 rows = [("Entry", BLUE), ("Replication", ORANGE)]
 rng = np.random.default_rng(42)
 for i, (role, col) in enumerate(rows):
@@ -143,3 +143,46 @@ plt.close(fig)
 print("Figure 1 dan 2 ditulis ke", OUT)
 for role in ("Entry","Replication"):
     print(f"   {role:12s} n={len(pos[role]):2d} mean={np.mean(pos[role]):.3f}")
+
+
+# ---------------------------------------------------------------- Figure PRIME
+# Replaces the manuscript's Figure 2: the physicochemical selection profile at
+# NiV-B L-protein site 210. Lambda and p come from the PRIME JSON directly, so
+# they cannot drift from the table.
+import json
+pj = json.load(open(f"{V}/04_selection/Nipah_NiVB/L_protein_prime.json"))
+row = pj["MLE"]["content"]["0"][209]          # zero-based index of codon 210
+props = [("Hydrophobicity", row[12], row[13]),
+         ("Isoelectric point", row[15], row[16]),
+         ("Volume", row[18], row[19])]
+omni_p, omni_q = row[9], row[10]
+
+fig, ax = plt.subplots(figsize=(6.70, 3.634))
+y = np.arange(len(props))[::-1]
+for yi, (name, lam, pv) in zip(y, props):
+    sig = pv < 0.05
+    col = (BLUE if lam > 0 else ORANGE) if sig else "#b9b8b0"
+    ax.barh(yi, lam, height=0.5, color=col, linewidth=0, zorder=3)
+    # Always annotate to the right of zero. A label trailing off a negative bar
+    # runs into the property name on the axis.
+    x = lam + 0.25 if lam > 0 else 0.25
+    ax.annotate(f"lambda = {lam:+.2f}   p = {pv:.3f}", (x, yi), va="center",
+                ha="left", fontsize=8.5, color=INK if sig else INK2)
+ax.axvline(0, color=INK2, linewidth=1.0, zorder=4)
+ax.set_yticks(y); ax.set_yticklabels([p[0] for p in props], fontsize=9, color=INK)
+ax.set_xlabel("PRIME lambda   (positive = property conserved, negative = property diversifying)",
+              fontsize=9, color=INK)
+lim = max(abs(p[1]) for p in props) * 2.05
+ax.set_xlim(-lim, lim); ax.set_ylim(-0.6, len(props) - 0.4)
+ax.xaxis.grid(True, color=GRID, linewidth=0.7, zorder=0); ax.set_axisbelow(True)
+for s_ in ("top", "right", "left"): ax.spines[s_].set_visible(False)
+ax.annotate(f"NiV-B L-protein site 210   omnibus p = {omni_p:.3f}, q = {omni_q:.2f}",
+            (0.5, 1.02), xycoords="axes fraction", ha="center", va="bottom",
+            fontsize=8.5, color=INK2)
+ax.annotate("grey = not significant", (0.99, 0.02), xycoords="axes fraction",
+            ha="right", fontsize=7.5, color=INK2)
+fig.savefig(f"{OUT}/Figure2_PRIME_L210.png")
+plt.close(fig)
+print("Figure PRIME (situs 210) ditulis")
+for n, l, pv in props:
+    print(f"   {n:20s} lambda={l:+.4f}  p={pv:.6f}")
