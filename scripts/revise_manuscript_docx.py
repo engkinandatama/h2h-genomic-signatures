@@ -12,6 +12,8 @@ aspect ratio, so a replacement figure is never stretched.
 Usage:
     python scripts/revise_manuscript_docx.py <in.docx> <out.docx>
 """
+import json
+import os
 import re
 import struct
 import sys
@@ -20,6 +22,7 @@ import zipfile
 BLUE = "1F4E79"
 GREY = "808080"
 FIG = ".dev/manuscript/revisi_figures"
+TABLES_JSON = ".dev/manuscript/revisi_tables.json"
 
 MEDIA = {
     "word/media/image1.png": f"{FIG}/Figure1_H2H_vs_spillover_rate.png",
@@ -184,6 +187,19 @@ CAPTIONS = {
 # may be struck through.
 TEXT_ONLY_STRIKE = {252}
 
+TABLE_CAPTIONS = {
+224: "Table 1 Gene-wide selection metrics per lineage and protein. Consensus sites: called "
+     "positively selected by at least two of the four site-level models. Episodic-only "
+     "sites: significant under MEME with no support from the pervasive models. RELAX K "
+     "above 1 indicates intensification and below 1 relaxation, relative to the reservoir "
+     "branches; the test is not applicable to lineages without a reservoir comparator. The "
+     "value for Nipah NiV-B G approaches the upper bound HyPhy places on K and should be "
+     "read as strong intensification of uncertain magnitude rather than as a point "
+     "estimate. Purifying (%): proportion of codons called under purifying selection by "
+     "both available models, which is conservative and not comparable in power to the "
+     "positive-selection column.",
+}
+
 INSERTIONS = {
 295: ["AUTHOR NOTE, DELETE BEFORE SUBMISSION: Figure 3 is a screenshot of the interactive 3D "
       "viewer and could not be regenerated automatically. Open the viewer from the current "
@@ -211,6 +227,44 @@ INSERTIONS = {
  "co-occurrence test proved underpowered, and its p value has not been adjusted for that "
  "choice."],
 }
+
+
+def cell(text, header=False, width=0):
+    shade = '<w:shd w:val="clear" w:color="auto" w:fill="EDF3FA"/>' if header else ""
+    bold = "<w:b/>" if header else ""
+    return (f'<w:tc><w:tcPr><w:tcW w:w="{width}" w:type="dxa"/>{shade}</w:tcPr>'
+            f'<w:p><w:pPr><w:spacing w:before="20" w:after="20" w:line="240" '
+            f'w:lineRule="auto"/></w:pPr><w:r><w:rPr>{bold}'
+            f'<w:color w:val="{BLUE}"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr>'
+            f'<w:t xml:space="preserve">{esc(str(text))}</w:t></w:r></w:p></w:tc>')
+
+
+def build_table(rows):
+    """
+    A fresh table grid in blue.
+
+    The replacements change the number of columns -- the site table gains a
+    q-value column, the recombination table gains three -- so the original grid
+    cannot simply be refilled.
+    """
+    ncol = max(len(r) for r in rows)
+    total = 9638                                  # content width in twips
+    width = total // ncol
+    borders = ("<w:tblBorders>" + "".join(
+        f'<w:{e} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>'
+        for e in ("top", "left", "bottom", "right", "insideH", "insideV")) +
+        "</w:tblBorders>")
+    grid = "".join('<w:gridCol w:w="%d"/>' % width for _ in range(ncol))
+    out = [f'<w:tbl><w:tblPr><w:tblW w:w="{total}" w:type="dxa"/>{borders}'
+           '<w:tblLayout w:type="fixed"/></w:tblPr>'
+           f'<w:tblGrid>{grid}</w:tblGrid>']
+    for i, r in enumerate(rows):
+        cells = "".join(cell(r[j] if j < len(r) else "", header=(i == 0), width=width)
+                        for j in range(ncol))
+        rpr = '<w:trPr><w:tblHeader/></w:trPr>' if i == 0 else ""
+        out.append(f"<w:tr>{rpr}{cells}</w:tr>")
+    out.append("</w:tbl>")
+    return "".join(out)
 
 
 def esc(t):
@@ -270,7 +324,10 @@ def main(src, dst):
     out, prev, n_rep, n_cap, n_ins = [], 0, 0, 0, 0
     for i, (a, b, para) in enumerate(spans):
         out.append(xml[prev:a])
-        if i in REPLACEMENTS or i in CAPTIONS:
+        if i in TABLE_CAPTIONS:
+            out.append(strike_paragraph(para))
+            out.append(blue_paragraph(TABLE_CAPTIONS[i])); n_cap += 1
+        elif i in REPLACEMENTS or i in CAPTIONS:
             out.append(strike_paragraph(para, text_only=i in TEXT_ONLY_STRIKE))
             for t in REPLACEMENTS.get(i, []):
                 out.append(blue_paragraph(t))
@@ -287,6 +344,17 @@ def main(src, dst):
         prev = b
     out.append(xml[prev:])
     new_xml = "".join(out)
+
+    if os.path.exists(TABLES_JSON):
+        tables = json.load(open(TABLES_JSON))
+        spans_t = [(m.start(), m.end()) for m in
+                   re.finditer(r"<w:tbl>.*?</w:tbl>", new_xml, re.S)]
+        for idx in sorted((int(k) for k in tables), reverse=True):
+            if idx >= len(spans_t):
+                continue
+            a, b = spans_t[idx]
+            new_xml = new_xml[:a] + build_table(tables[str(idx)]) + new_xml[b:]
+        print(f"tabel dibangun ulang  : {len(tables)}")
 
     rels = zin.read("word/_rels/document.xml.rels").decode()
     rid_of = {t: r for r, t in re.findall(r'Id="(rId\d+)"[^>]*Target="(media/[^"]+)"', rels)}
